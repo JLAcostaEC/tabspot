@@ -1,7 +1,7 @@
 <p align="center">
 	<picture>
-  		<source media="(prefers-color-scheme: dark)" srcset="#" height="130" style="margin-bottom: 20px">
-  		<img alt="TabSpot Logo" src="#" height="130" style="margin-bottom: 20px"/>
+  		<source media="(prefers-color-scheme: dark)" srcset="https://github.com/JLAcostaEC/tabspot/blob/main/assets/logo-dark.jpg?raw=true" height="260" />
+  		<img alt="TabSpot Logo" src="https://github.com/JLAcostaEC/tabspot/blob/main/assets/logo-white.jpg?raw=true" height="260" />
 	</picture>
 </p>
 
