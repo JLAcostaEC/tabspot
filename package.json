@@ -1,0 +1,68 @@
+{
+  "name": "tabspot",
+  "version": "0.0.0",
+  "description": "Keyboard navigation engine for hierarchical interfaces",
+  "keywords": [
+    "a11y",
+    "accessibility",
+    "arrow-keys",
+    "focus",
+    "keyboard",
+    "navigation",
+    "tab"
+  ],
+  "license": "MIT",
+  "author": "Jorge Acosta",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JLAcostaEC/tabspot.git"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "lint:fix": "oxlint --fix src",
+    "format": "oxfmt src",
+    "format:check": "oxfmt --check src",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
+    "@vitest/browser": "^4.1.7",
+    "@vitest/browser-playwright": "^4.1.7",
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
+    "playwright": "^1.60.0",
+    "publint": "^0.3.21",
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "pnpm@11.0.0"
+}

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": ["src"],
+  "exclude": ["src/tests", "src/**/*.test.ts"]
+}

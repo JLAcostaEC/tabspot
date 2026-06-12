@@ -1,0 +1,26 @@
+node_modules
+coverage
+
+# Testing
+src/tests/__screenshots__
+src/tests/.tmp
+src/tests/.cli-tmp
+src/tests/.bench-tmp
+.vitest-attachments
+
+# Output
+.output
+/dist
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# LLMS
+.claude
