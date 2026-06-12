@@ -6,12 +6,7 @@ import {
   TABSPOT_ATTR,
   validateNodeOptions,
 } from "./parser.ts";
-import type {
-  SetAttributesArgs,
-  SetAttributesResult,
-  TabspotInstance,
-  TabspotNodeOptions,
-} from "./types.ts";
+import type { SetAttributesArgs, SetAttributesResult, TabspotNodeOptions } from "./types.ts";
 
 const fallbackLogger = createLogger();
 
