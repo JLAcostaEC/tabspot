@@ -46,7 +46,9 @@
     "lint:fix": "oxlint --fix src",
     "format": "oxfmt src",
     "format:check": "oxfmt --check src",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test"
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test",
+    "changeset:version": "changeset version && git add --all",
+    "changeset:publish": "changeset publish"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
