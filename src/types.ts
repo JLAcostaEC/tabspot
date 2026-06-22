@@ -13,6 +13,7 @@ import type {
   GridFlow,
   ManagedKey,
   MoverAxis,
+  RootSpecialKey,
   RtlMode,
   Visibility,
 } from "./enums.ts";
@@ -25,6 +26,7 @@ export type {
   ManagedKey,
   MoverAxis,
   MoverLayout,
+  RootSpecialKey,
   RtlMode,
   Visibility,
 } from "./enums.ts";
@@ -161,9 +163,13 @@ export interface TabspotGrouperOptions {
 }
 
 export interface TabspotRootOptions {
-  manageEscape?: boolean;
-  /** Governs Home/End/PageUp/PageDown/Ctrl+Home/Ctrl+End. */
-  manageHomeEnd?: boolean;
+  /**
+   * Which special (non-arrow) keys Tabspot handles at the root level.
+   * `Escape` exits the widget; `Home`/`End` and `PageUp`/`PageDown` jump
+   * within it. Pass `true` to handle them all, or an object to toggle each
+   * key individually. Omitted keys (and the absent option) default to off.
+   */
+  manageSpecialKeys?: boolean | Partial<Record<RootSpecialKey, boolean>>;
   /** Directionality for horizontal arrows. Default `"auto"`. */
   rtl?: RtlMode;
   debug?: DebugLevel;

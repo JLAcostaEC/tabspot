@@ -14,10 +14,12 @@ import type {
   GridRowStrategy,
   ManagedKey,
   MoverAxis,
+  RootSpecialKey,
   TabspotEventListener,
   TabspotGridMoverOptions,
   TabspotMoverOptions,
   TabspotNavigationEvent,
+  TabspotRootOptions,
 } from "./types.ts";
 
 type NavDirection = TabspotNavigationEvent["direction"];
@@ -33,6 +35,13 @@ const KEY_TO_DIR: Record<string, EnterExitDirections> = {
 
 function directionAxis(dir: EnterExitDirections): MoverAxis {
   return HORIZONTAL.has(dir) ? "horizontal" : "vertical";
+}
+
+/** Resolve whether a root-level special key is handled (boolean or per-key form). */
+function managesSpecialKey(rootOpts: TabspotRootOptions, key: RootSpecialKey): boolean {
+  const m = rootOpts.manageSpecialKeys;
+  if (typeof m === "boolean") return m;
+  return m?.[key] === true;
 }
 
 /** Type guard: a grid mover (2-D matrix), vs a linear (1-D axis) mover. */
@@ -346,18 +355,16 @@ export function handleKeydown(event: KeyboardEvent, deps: NavigationDeps): boole
   if (moverOnTarget?.ignoreKeys?.includes(key as ManagedKey)) return false;
 
   // Escape
-  if (key === "Escape" && rootOpts.manageEscape) {
+  if (key === "Escape" && managesSpecialKey(rootOpts, "Escape")) {
     return handleEscape(focusable, deps, event);
   }
 
-  // Home / End / PageUp / PageDown (all gated by manageHomeEnd)
-  if (rootOpts.manageHomeEnd) {
-    if (key === "Home" || key === "End") {
-      return handleHomeEnd(focusable, key === "End", event.ctrlKey, deps, event);
-    }
-    if (key === "PageUp" || key === "PageDown") {
-      return handlePage(focusable, key === "PageDown", deps, event);
-    }
+  // Home / End / PageUp / PageDown (each gated individually by manageSpecialKeys)
+  if ((key === "Home" || key === "End") && managesSpecialKey(rootOpts, key)) {
+    return handleHomeEnd(focusable, key === "End", event.ctrlKey, deps, event);
+  }
+  if ((key === "PageUp" || key === "PageDown") && managesSpecialKey(rootOpts, key)) {
+    return handlePage(focusable, key === "PageDown", deps, event);
   }
 
   // Arrows

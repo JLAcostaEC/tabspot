@@ -37,6 +37,14 @@ export const MANAGED_KEYS = [
 ] as const;
 export type ManagedKey = (typeof MANAGED_KEYS)[number];
 
+/**
+ * Special (non-arrow) keys whose handling is toggled at the root level:
+ * `Escape` exits the widget; the rest jump within it. Values are exact
+ * `KeyboardEvent.key` strings so dispatch is a direct lookup.
+ */
+export const ROOT_SPECIAL_KEYS = ["Escape", "Home", "End", "PageUp", "PageDown"] as const;
+export type RootSpecialKey = (typeof ROOT_SPECIAL_KEYS)[number];
+
 export const ACTIVATION_MODES = ["focus", "activedescendant", "marked", "controlled"] as const;
 export type ActivationMode = (typeof ACTIVATION_MODES)[number];
 

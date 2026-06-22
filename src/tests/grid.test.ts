@@ -49,7 +49,7 @@ function mountGrid(flow: GridFlow, cyclic = false): GridRefs {
   const root = document.getElementById("grid") as HTMLElement;
   setTabspotAttributes({
     element: root,
-    config: { root: { manageHomeEnd: true }, mover: { layout: "grid", flow, cyclic } },
+    config: { root: { manageSpecialKeys: true }, mover: { layout: "grid", flow, cyclic } },
   });
 
   return {

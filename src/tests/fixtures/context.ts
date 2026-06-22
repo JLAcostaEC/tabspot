@@ -102,20 +102,19 @@ export function mountContext(opts: TabspotOptions = {}): ContextRefs {
     element: header,
     config: {
       root: {
-        manageEscape: true,
-        manageHomeEnd: true,
+        manageSpecialKeys: true,
       },
       mover: { axis: "vertical", cyclic: true },
     },
   });
   setTabspotAttributes({
     element: main,
-    config: { root: { manageEscape: true, manageHomeEnd: true }, mover: { axis: "horizontal" } },
+    config: { root: { manageSpecialKeys: true }, mover: { axis: "horizontal" } },
   });
   setTabspotAttributes({
     element: footer,
     config: {
-      root: { manageEscape: true, manageHomeEnd: true },
+      root: { manageSpecialKeys: true },
       mover: { axis: "vertical", cyclic: true },
     },
   });
