@@ -48,7 +48,7 @@ const nav = document.querySelector<HTMLElement>("#main-nav")!;
 setTabspotAttributes({
   element: nav,
   config: {
-    root: { manageEscape: true, manageHomeEnd: true },
+    root: { manageSpecialKeys: true },
     mover: { axis: "vertical", cyclic: true },
   },
 });
@@ -60,7 +60,7 @@ For SSR use `getTabspotAttributes`, it returns the attributes to be rendered on 
 import { getTabspotAttributes } from "tabspot";
 
 const attrs = getTabspotAttributes({
-  root: { manageEscape: true, manageHomeEnd: true },
+  root: { manageSpecialKeys: true },
   mover: { axis: "vertical", cyclic: true },
 });
 
@@ -88,8 +88,9 @@ Every element configured with Tabspot carries a single `data-tabspot` attribute 
 ```ts
 interface TabspotNodeOptions {
   root?: {
-    manageEscape?: boolean;
-    manageHomeEnd?: boolean; // Home/End/PageUp/PageDown/Ctrl+Home/Ctrl+End
+    // true = handle all; or toggle each key. Esc exits; the rest jump.
+    manageSpecialKeys?: boolean | Partial<Record<RootSpecialKey, boolean>>;
+    //   RootSpecialKey = "Escape" | "Home" | "End" | "PageUp" | "PageDown"
     rtl?: "auto" | "ltr" | "rtl";
     debug?: "basic" | "full";
   };
@@ -131,7 +132,7 @@ type Activation =
 ### Levels and transitions
 
 - **Mover**: its children stay at the parent's level. A linear Mover carries the axis + cyclic behavior for in-axis moves.
-- **Grouper** opens a new level (`level + 1`). Enter via `grouper.enterDirection` from a sibling, or any cross-axis arrow when the grouper is implicit. Exit via `grouper.exitDirection` (gated by first/last + `enterExitOnLast`) or `Escape` (if `manageEscape`).
+- **Grouper** opens a new level (`level + 1`). Enter via `grouper.enterDirection` from a sibling, or any cross-axis arrow when the grouper is implicit. Exit via `grouper.exitDirection` (gated by first/last + `enterExitOnLast`) or `Escape` (if `manageSpecialKeys.Escape`).
 - A focusable that declares its own `mover` synthesizes an `implicit grouper` underneath.
 
 ## Grid movers (`layout: "grid"`)
@@ -151,7 +152,7 @@ A grid mover navigates its items as a 2-D matrix: **both** axes move. Rows are d
 - **`flow: "contained"`** (default) — `ArrowLeft|Right` move within the current row; `ArrowUp|Down` within the column. Clamps at every edge.
 - **`flow: "linear"`** — vertical is identical, but `ArrowLeft|Right` traverse the whole row-major sequence (end of a row continues into the next), clamping only at the global first/last cell.
 - `cyclic: true` wraps within the row/column (or around the whole sequence for `flow: "linear"`).
-- **Keys** (with `manageHomeEnd`): `Home`/`End` → start/end of the current row; `Ctrl+Home`/`Ctrl+End` → first/last cell of the grid; `PageUp`/`PageDown` → ±`pageSize` rows (default 5).
+- **Keys** (gated per-key by `manageSpecialKeys`): `Home`/`End` → start/end of the current row; `Ctrl+Home`/`Ctrl+End` → first/last cell of the grid; `PageUp`/`PageDown` → ±`pageSize` rows (default 5).
 - Row strategies handle markup `parent`-grouping can't: `{by:"selector",row:"tr"}` for `<td><button>` cells, `{by:"columns",count}` for CSS grids without row wrappers, `{by:"geometry"}` for flex-wrap layouts.
 
 ## `items` — declaring the navigable set

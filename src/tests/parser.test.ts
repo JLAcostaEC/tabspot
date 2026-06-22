@@ -4,12 +4,41 @@ import { parseTabspotAttribute, serializeTabspotConfig, validateNodeOptions } fr
 describe("parser", () => {
   it("parses a valid root + mover config", () => {
     const cfg = parseTabspotAttribute(
-      '{"root":{"manageEscape":true},"mover":{"axis":"vertical","cyclic":true}}',
+      '{"root":{"manageSpecialKeys":{"Escape":true}},"mover":{"axis":"vertical","cyclic":true}}',
     );
     expect(cfg).toEqual({
-      root: { manageEscape: true },
+      root: { manageSpecialKeys: { Escape: true } },
       mover: { axis: "vertical", cyclic: true },
     });
+  });
+
+  it("accepts the manageSpecialKeys boolean shorthand", () => {
+    expect(parseTabspotAttribute('{"root":{"manageSpecialKeys":true}}')).toEqual({
+      root: { manageSpecialKeys: true },
+    });
+  });
+
+  it("accepts per-key manageSpecialKeys toggles", () => {
+    expect(
+      parseTabspotAttribute('{"root":{"manageSpecialKeys":{"Home":true,"End":false,"PageDown":true}}}'),
+    ).toEqual({
+      root: { manageSpecialKeys: { Home: true, End: false, PageDown: true } },
+    });
+  });
+
+  it("rejects unknown keys inside manageSpecialKeys", () => {
+    expect(parseTabspotAttribute('{"root":{"manageSpecialKeys":{"Enter":true}}}')).toBeNull();
+    expect(parseTabspotAttribute('{"root":{"manageSpecialKeys":{"ArrowUp":true}}}')).toBeNull();
+  });
+
+  it("rejects non-boolean manageSpecialKeys values", () => {
+    expect(parseTabspotAttribute('{"root":{"manageSpecialKeys":"true"}}')).toBeNull();
+    expect(parseTabspotAttribute('{"root":{"manageSpecialKeys":{"Home":"yes"}}}')).toBeNull();
+  });
+
+  it("rejects the removed manageEscape/manageHomeEnd options", () => {
+    expect(parseTabspotAttribute('{"root":{"manageEscape":true}}')).toBeNull();
+    expect(parseTabspotAttribute('{"root":{"manageHomeEnd":true}}')).toBeNull();
   });
 
   it("returns null on malformed JSON", () => {
@@ -44,11 +73,11 @@ describe("parser", () => {
 
   it("serializeTabspotConfig round-trips valid config", () => {
     const json = serializeTabspotConfig({
-      root: { manageEscape: true },
+      root: { manageSpecialKeys: { Escape: true } },
       mover: { axis: "horizontal", cyclic: true },
     });
     expect(parseTabspotAttribute(json)).toEqual({
-      root: { manageEscape: true },
+      root: { manageSpecialKeys: { Escape: true } },
       mover: { axis: "horizontal", cyclic: true },
     });
   });

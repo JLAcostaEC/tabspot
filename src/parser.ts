@@ -5,6 +5,7 @@ import {
   MANAGED_KEYS,
   MOVER_AXES,
   MOVER_LAYOUTS,
+  ROOT_SPECIAL_KEYS,
   ROW_STRATEGIES,
   RTL_MODES,
   VISIBILITIES,
@@ -16,6 +17,7 @@ import type {
   GridRowStrategy,
   ManagedKey,
   MoverAxis,
+  RootSpecialKey,
   TabspotGridMoverOptions,
   TabspotGrouperOptions,
   TabspotLinearMoverOptions,
@@ -28,7 +30,8 @@ import type {
 
 export const TABSPOT_ATTR = "data-tabspot";
 
-const ROOT_KEYS = new Set(["manageEscape", "manageHomeEnd", "rtl", "debug"]);
+const ROOT_KEYS = new Set(["manageSpecialKeys", "rtl", "debug"]);
+const ROOT_SPECIAL_KEY_SET = new Set<string>(ROOT_SPECIAL_KEYS);
 const LINEAR_MOVER_KEYS = new Set([
   "layout",
   "axis",
@@ -97,11 +100,29 @@ function rejectUnknownKeys(
   }
 }
 
+function validateManageSpecialKeys(
+  raw: unknown,
+): boolean | Partial<Record<RootSpecialKey, boolean>> {
+  if (typeof raw === "boolean") return raw;
+  if (!isPlainObject(raw)) {
+    throw new Error(
+      `"manageSpecialKeys" must be a boolean or an object of ${ROOT_SPECIAL_KEYS.join("|")} booleans`,
+    );
+  }
+  rejectUnknownKeys(raw, ROOT_SPECIAL_KEY_SET, "manageSpecialKeys");
+  const out: Partial<Record<RootSpecialKey, boolean>> = {};
+  for (const key of Object.keys(raw) as RootSpecialKey[]) {
+    out[key] = bool(raw[key], `manageSpecialKeys.${key}`);
+  }
+  return out;
+}
+
 function validateRoot(raw: Record<string, unknown>): TabspotRootOptions {
   rejectUnknownKeys(raw, ROOT_KEYS, "root");
   const out: TabspotRootOptions = {};
-  if ("manageEscape" in raw) out.manageEscape = bool(raw.manageEscape, "manageEscape");
-  if ("manageHomeEnd" in raw) out.manageHomeEnd = bool(raw.manageHomeEnd, "manageHomeEnd");
+  if ("manageSpecialKeys" in raw) {
+    out.manageSpecialKeys = validateManageSpecialKeys(raw.manageSpecialKeys);
+  }
   if ("rtl" in raw) out.rtl = oneOf(raw.rtl, RTL_MODES, "rtl");
   if ("debug" in raw) {
     if (raw.debug !== "basic" && raw.debug !== "full") {
