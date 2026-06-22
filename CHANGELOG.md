@@ -1,5 +1,11 @@
 # tabspot
 
+## 0.3.1
+
+### Patch Changes
+
+- [#8](https://github.com/JLAcostaEC/tabspot/pull/8) [`fe0e503`](https://github.com/JLAcostaEC/tabspot/commit/fe0e5038ebc461ff9da2bbce744ef528bba772a8) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - fix: search for mover/grouper inside mover item
+
 ## 0.3.0
 
 ### Minor Changes
