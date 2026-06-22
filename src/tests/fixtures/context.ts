@@ -89,6 +89,15 @@ export function mountContext(opts: TabspotOptions = {}): ContextRefs {
           <a href="#">SubLink 21-3</a>
         </div>
       </div>
+      <div class="column" data-tabspot='{"grouper":{}}'>
+        <a href="#">Link 22</a>
+        <div class="row"
+             data-tabspot='{"grouper":{"exitDirection":"up","enterDirection":"right"},"mover":{"axis":"horizontal"}}'>
+          <a href="#">SubLink 22-1</a>
+          <a href="#">SubLink 22-2</a>
+        </div>
+        <a href="#">Link 23</a>
+      </div>
     </footer>
   `;
 
