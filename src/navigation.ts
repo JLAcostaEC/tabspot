@@ -114,7 +114,9 @@ function enclosingGrouper(node: FocusableNode): GrouperNode | null {
 
 /** Find the focusable that serves as the anchor (entry point) of a grouper. */
 function grouperAnchor(grouper: GrouperNode, compiled: CompiledRoot): FocusableNode | null {
-  if (grouper.implicit) return grouper.owner;
+  // An owned subgroup (implicit or configured group-inside-item) anchors on its
+  // owning focusable; only sibling groupers resolve to the preceding focusable.
+  if (grouper.owner) return grouper.owner;
   const parent = grouper.parent;
   // Walk through parent.children to find the previous focusable before the grouper.
   // The grouper may not be a direct child of parent if it's wrapped in a mover, so
@@ -396,9 +398,12 @@ function handleArrow(
     if (focusable.subGroup) {
       const sub = focusable.subGroup;
       const matchesExplicit = sub.opts.enterDirection === dir;
-      const matchesImplicit =
-        sub.implicit && !sub.opts.enterDirection && linearAxis(sub.mover) === directionAxis(dir);
-      if (matchesExplicit || matchesImplicit) {
+      // No enterDirection declared: an owned subgroup is entered by pressing in
+      // the subgroup's own axis (cross-axis to the parent level). Covers both
+      // implicit subgroups (inline mover) and configured group-inside-item.
+      const matchesCrossAxis =
+        !sub.opts.enterDirection && linearAxis(sub.mover) === directionAxis(dir);
+      if (matchesExplicit || matchesCrossAxis) {
         return performMove(focusable, entryTarget(sub, deps.compiled), dir, rawEvent, deps);
       }
     }
@@ -412,8 +417,10 @@ function handleArrow(
     const g = enclosingGrouper(focusable);
     if (g) {
       const explicitExit = g.opts.exitDirection === dir;
-      const implicitExit = g.implicit && !g.opts.exitDirection;
-      if (explicitExit || implicitExit) {
+      // Owned subgroups (implicit or group-inside-item) without an explicit
+      // exitDirection auto-exit when the cross-axis is pressed.
+      const crossAxisExit = !!g.owner && !g.opts.exitDirection;
+      if (explicitExit || crossAxisExit) {
         return performMove(focusable, grouperAnchor(g, deps.compiled), dir, rawEvent, deps);
       }
     }

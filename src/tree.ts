@@ -302,8 +302,8 @@ function collectChildren(
       out.push(focusable);
 
       if (cfg?.mover) {
-        // Focusable owns its own subgroup: implicit grouper + mover.
-        // Children inside are focusables descendants forming a subnivel.
+        // Focusable owns its own subgroup via an inline mover: implicit grouper.
+        // Children inside are focusable descendants forming a subnivel.
         const sub: GrouperNode = {
           kind: "grouper",
           el,
@@ -320,6 +320,32 @@ function collectChildren(
         sub.children = collectChildren(el, sub, ctx, level + 1);
         ctx.defaultMover = prevDefault;
         focusable.subGroup = sub;
+      } else {
+        // Group-inside-item: a configured grouper/mover nested *within* the
+        // focusable becomes its subgroup (the ARIA tree pattern — a `treeitem`
+        // wrapping its own `role="group"`). Entry/exit anchors on the owning
+        // focusable like an implicit grouper, but enter/exit directions and the
+        // mover come from the nested element's own config.
+        const subEl = findItemSubgroup(el, ctx);
+        if (subEl) {
+          const subCfg = readTabspotConfig(subEl)!;
+          const sub: GrouperNode = {
+            kind: "grouper",
+            el: subEl,
+            parent: focusable.parent, // structural marker; lives "under" the focusable
+            opts: subCfg.grouper ?? {},
+            mover: subCfg.mover ?? ctx.defaultMover,
+            implicit: false,
+            owner: focusable,
+            level: level + 1,
+            children: [],
+          };
+          const prevDefault = ctx.defaultMover;
+          if (subCfg.mover) ctx.defaultMover = subCfg.mover;
+          sub.children = collectChildren(subEl, sub, ctx, level + 1);
+          ctx.defaultMover = prevDefault;
+          focusable.subGroup = sub;
+        }
       }
       continue;
     }
@@ -334,6 +360,25 @@ function collectChildren(
 function isConfigured(el: HTMLElement): boolean {
   const cfg = readTabspotConfig(el);
   return !!(cfg && (cfg.root || cfg.mover || cfg.grouper));
+}
+
+/**
+ * Find the configured grouper/mover element nested *inside* a focusable item
+ * (its subgroup), descending through non-configured wrappers (labels, divs).
+ * Stops at the first configured wrapper or nested item, so an incidental
+ * focusable inside the item (e.g. a row action) is never promoted to a sublevel
+ * — only an explicitly configured group is. Returns the first match, or null.
+ */
+function findItemSubgroup(el: HTMLElement, ctx: BuildCtx): HTMLElement | null {
+  for (const node of walk(
+    el,
+    (n) => n instanceof HTMLElement && (isConfigured(n) || isItem(n, ctx)),
+  )) {
+    if (!(node instanceof HTMLElement)) continue;
+    const cfg = readTabspotConfig(node);
+    if (cfg && (cfg.grouper || cfg.mover)) return node;
+  }
+  return null;
 }
 
 /**
