@@ -134,4 +134,15 @@ describe("navigation: footer", () => {
     press(ctx.byText("SubLink 21-2"), "ArrowRight");
     expect(document.activeElement?.textContent?.trim()).toBe("SubLink 21-3");
   });
+
+  it("Link 22 ArrowRight enters its own subgroup at SubLink 22-1", () => {
+    press(ctx.byText("Link 22"), "ArrowRight");
+    expect(document.activeElement?.textContent?.trim()).toBe("SubLink 22-1");
+  });
+
+  it("Link 23 ArrowRight does NOT enter the previous sibling's subgroup", () => {
+    const before = ctx.byText("Link 23");
+    press(before, "ArrowRight");
+    expect(document.activeElement).toBe(before);
+  });
 });

@@ -548,15 +548,12 @@ function findAdjacentGrouperWithEnter(
   const flat = getLevelNodes(compiled, container);
   const idx = flat.indexOf(focusable);
   if (idx === -1) return null;
-  // Search both neighbors regardless of direction; the grouper declares the direction.
+  // Only look forward: a grouper is entered through its anchor, which is the
+  // focusable immediately preceding it. A grouper found by walking backward
+  // belongs to an earlier sibling (its anchor is not this focusable), so
+  // entering it would cross sibling boundaries into a previous sibling's
+  // sublevel — the bug this guards against.
   for (let i = idx + 1; i < flat.length; i++) {
-    const n = flat[i]!;
-    if (n.kind === "grouper") {
-      return n.opts.enterDirection === dir ? n : null;
-    }
-    if (n.kind === "focusable") break;
-  }
-  for (let i = idx - 1; i >= 0; i--) {
     const n = flat[i]!;
     if (n.kind === "grouper") {
       return n.opts.enterDirection === dir ? n : null;
