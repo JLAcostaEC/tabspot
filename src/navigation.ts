@@ -7,7 +7,7 @@ import type {
   GrouperNode,
   NavNode,
 } from "./tree.ts";
-import { realIndex, type VirtualTarget } from "./virtual.ts";
+import { getVirtualAdapter, realIndex, type VirtualTarget } from "./virtual.ts";
 import type {
   EnterExitDirections,
   GridCell,
@@ -100,6 +100,31 @@ function levelContainer(node: FocusableNode): ContainerNode {
   }
   // unreachable for valid trees
   return node.parent;
+}
+
+/**
+ * Whether crossing the boundary in `dir` from `focusable` is owned by the
+ * virtualization layer (handled by core's `tryVirtual` once the in-DOM move
+ * clamps), rather than by an in-DOM cyclic wrap. True only at the root level of
+ * a virtualized root, for the axis/rows the virtualizer windows, when the item
+ * carries a real index. When true, the cyclic wrap must be deferred so it lands
+ * on the real first/last item instead of the first/last *rendered* one.
+ */
+function virtualHandlesBoundary(
+  focusable: FocusableNode,
+  compiled: CompiledRoot,
+  dir: EnterExitDirections,
+): boolean {
+  if (!getVirtualAdapter(compiled.root.el)) return false;
+  if (levelContainer(focusable).kind !== "root") return false;
+  const mover = effectiveMover(focusable);
+  if (!mover) return false;
+  if (isGridMover(mover)) {
+    if (HORIZONTAL.has(dir)) return false; // columns are not virtualized
+  } else if (mover.axis !== directionAxis(dir)) {
+    return false; // cross-axis is grouper territory, not virtual
+  }
+  return realIndex(focusable.el) !== null;
 }
 
 /** Returns the nearest GrouperNode ancestor, or null. */
@@ -444,14 +469,11 @@ function handleArrow(
     return moveSibling(focusable, dir, mover, deps, rawEvent, /* allowCyclic */ false);
   }
 
-  return moveSibling(
-    focusable,
-    dir,
-    mover,
-    deps,
-    rawEvent,
-    /* allowCyclic */ mover?.cyclic === true,
-  );
+  // Defer the cyclic wrap to the virtual layer at a virtualized root edge, so it
+  // lands on the real first/last item rather than the first/last rendered one.
+  const allowCyclic =
+    mover?.cyclic === true && !virtualHandlesBoundary(focusable, deps.compiled, dir);
+  return moveSibling(focusable, dir, mover, deps, rawEvent, allowCyclic);
 }
 
 function moveSibling(
@@ -493,7 +515,10 @@ function handleGridArrow(
 ): boolean {
   const horizontal = HORIZONTAL.has(dir);
   const forward = isForward(dir, deps.compiled.rtl);
-  const cyclic = mover.cyclic === true;
+  // For vertical moves across virtualized rows, defer the cyclic wrap to the
+  // virtual layer (lands on the real first/last row). `virtualHandlesBoundary`
+  // is false for horizontal moves, so within-row wrapping is preserved.
+  const cyclic = mover.cyclic === true && !virtualHandlesBoundary(focusable, deps.compiled, dir);
 
   // flow:"linear" horizontal == 1-D move over the mover-transparent flat list.
   if (mover.flow === "linear" && horizontal) {
@@ -673,20 +698,38 @@ function performMove(
 }
 
 /**
+ * Resolve an out-of-range index. In range: passed through unchanged. Out of
+ * range: wraps to the opposite end when `cyclic` and `total` is known (ArrowUp
+ * past the first real item -> last; ArrowDown past the last -> first), else
+ * null. Without a known total a cyclic wrap can't be placed, so it returns null.
+ */
+function wrapIndex(index: number, total: number | null, cyclic: boolean): number | null {
+  if (index >= 0 && (total === null || index < total)) return index;
+  if (!cyclic || total === null || total === 0) return null;
+  return index < 0 ? total - 1 : 0;
+}
+
+/**
  * When an in-axis move clamps at the rendered edge of a virtual list, compute
  * the real index just beyond. The engine then scrolls there and re-activates.
- * Returns null when the key isn't an in-axis/vertical move or there's no real
- * index to read.
+ * With a cyclic mover and a known `total`, a move past the real first/last item
+ * wraps to the opposite end. Returns null when the key isn't an in-axis/vertical
+ * move, there's no real index to read, or the move runs off a non-cyclic edge.
  */
 export function resolveBoundaryTarget(
   focusable: FocusableNode,
   compiled: CompiledRoot,
   key: string,
+  total: number | null,
 ): VirtualTarget | null {
   const dir = KEY_TO_DIR[key];
   if (!dir) return null;
   const mover = effectiveMover(focusable);
   if (!mover) return null;
+  const real = realIndex(focusable.el);
+  if (real === null) return null;
+  const forward = isForward(dir, compiled.rtl);
+  const cyclic = mover.cyclic === true;
 
   if (isGridMover(mover)) {
     // Only vertical crosses rows; columns are assumed rendered.
@@ -694,17 +737,13 @@ export function resolveBoundaryTarget(
     const layout = getGridLayout(compiled, levelContainer(focusable), mover.rows);
     const at = layout.pos.get(focusable);
     if (!at) return null;
-    const rowReal = realIndex(focusable.el);
-    if (rowReal === null) return null;
-    const forward = isForward(dir, compiled.rtl);
-    return { kind: "grid", row: rowReal + (forward ? 1 : -1), col: at.col };
+    const row = wrapIndex(real + (forward ? 1 : -1), total, cyclic);
+    return row === null ? null : { kind: "grid", row, col: at.col };
   }
 
   if (mover.axis !== directionAxis(dir)) return null; // cross-axis is grouper territory
-  const real = realIndex(focusable.el);
-  if (real === null) return null;
-  const forward = isForward(dir, compiled.rtl);
-  return { kind: "linear", index: real + (forward ? 1 : -1) };
+  const index = wrapIndex(real + (forward ? 1 : -1), total, cyclic);
+  return index === null ? null : { kind: "linear", index };
 }
 
 /**

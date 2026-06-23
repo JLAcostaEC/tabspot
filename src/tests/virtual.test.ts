@@ -73,6 +73,67 @@ describe("virtualization: linear list", () => {
   });
 });
 
+describe("virtualization: linear list with cyclic", () => {
+  const TOTAL = 100;
+
+  function mount(): void {
+    // Window of 3 items somewhere in the middle of the 100-item list.
+    document.body.innerHTML = `
+      <ul id="root">
+        <li data-index="50" tabindex="0">50</li>
+        <li data-index="51" tabindex="-1">51</li>
+        <li data-index="52" tabindex="-1">52</li>
+      </ul>`;
+    const root = byId("root");
+    const adapter: VirtualAdapter = {
+      count: () => TOTAL,
+      scrollToIndex: (i) => {
+        if (!root.querySelector(`[data-index="${i}"]`)) {
+          const li = document.createElement("li");
+          li.setAttribute("data-index", String(i));
+          li.setAttribute("tabindex", "-1");
+          li.textContent = String(i);
+          root.appendChild(li);
+        }
+      },
+    };
+    instance = tabspot();
+    setTabspotAttributes({
+      element: root,
+      config: { root: {}, mover: { axis: "vertical", cyclic: true } },
+    });
+    detach = tabspotVirtual(root, adapter);
+  }
+
+  it("ArrowUp on the real first item wraps to the real last item (not last rendered)", async () => {
+    mount();
+    // Render and focus item 0 (the real first item).
+    byId("root").insertAdjacentHTML("afterbegin", `<li data-index="0" tabindex="-1">0</li>`);
+    const first = byId("root").querySelector('[data-index="0"]') as HTMLElement;
+    press(first, "ArrowUp");
+    await tick();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("99");
+  });
+
+  it("ArrowDown on the real last item wraps to the real first item", async () => {
+    mount();
+    byId("root").insertAdjacentHTML("beforeend", `<li data-index="99" tabindex="-1">99</li>`);
+    const last = byId("root").querySelector('[data-index="99"]') as HTMLElement;
+    press(last, "ArrowDown");
+    await tick();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("0");
+  });
+
+  it("ArrowUp at the rendered edge (mid-list) scrolls to the previous real item, not a wrap", async () => {
+    mount();
+    // Window is [50,51,52]; ArrowUp on 50 should reach 49, not wrap to 99.
+    const top = byId("root").querySelector('[data-index="50"]') as HTMLElement;
+    press(top, "ArrowUp");
+    await tick();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("49");
+  });
+});
+
 describe("virtualization: dataTable (rows virtualized, column preserved)", () => {
   const TOTAL = 100;
 
