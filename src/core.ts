@@ -167,11 +167,12 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     const deps = makeDeps(rootEl, compiled);
     const current = deps.resolveCurrent(target);
     if (!current) return;
-    const vt = resolveBoundaryTarget(current, compiled, ev.key);
+    const total = totalCount(rootEl, adapter);
+    // resolveBoundaryTarget clamps/wraps against `total`: out-of-range non-cyclic
+    // edges return null; cyclic edges wrap to the opposite real end.
+    const vt = resolveBoundaryTarget(current, compiled, ev.key, total);
     if (!vt) return;
     const idx = vt.kind === "linear" ? vt.index : vt.row;
-    const total = totalCount(rootEl, adapter);
-    if (idx < 0 || (total !== null && idx >= total)) return; // genuinely at the end
     const dir = keyToDirection(ev.key);
     if (!dir) return;
     ev.preventDefault();
