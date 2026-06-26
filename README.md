@@ -35,7 +35,7 @@ npm install -D tabspot
 pnpm add -D tabspot
 ```
 >[!IMPORTANT]
-> Runtime needs a modern browser with `MutationObserver`, `WeakRef`, and `Element.checkVisibility`.
+> Runtime needs a modern browser with `MutationObserver`, `WeakRef`, `WeakMap`, and `Element.checkVisibility`.
 
 ## Quick start
 
