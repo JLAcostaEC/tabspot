@@ -195,7 +195,8 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       return;
     }
     if (pendingVirtual.get(rootEl) !== idx) return; // superseded
-    const rendered = await waitForRendered(rootEl, idx, 1000);
+    // Bind `tick` to correctly handle any `this` inside the adapter implementation
+    const rendered = await waitForRendered(rootEl, idx, 1000, adapter.tick?.bind(adapter));
     if (!rendered || pendingVirtual.get(rootEl) !== idx) return;
     pendingVirtual.delete(rootEl);
 

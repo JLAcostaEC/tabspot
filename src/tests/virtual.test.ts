@@ -12,6 +12,14 @@ function byId(id: string): HTMLElement {
 function tick(ms = 40): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+function renderRow(root: HTMLElement, i: number): void {
+  if (root.querySelector(`[data-index="${i}"]`)) return;
+  const li = document.createElement("li");
+  li.setAttribute("data-index", String(i));
+  li.setAttribute("tabindex", "-1");
+  li.textContent = String(i);
+  root.appendChild(li);
+}
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -131,6 +139,65 @@ describe("virtualization: linear list with cyclic", () => {
     press(top, "ArrowUp");
     await tick();
     expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("49");
+  });
+});
+
+describe("virtualization: tick (framework render-flush hook)", () => {
+  const TOTAL = 100;
+
+  function baseMarkup(): HTMLElement {
+    document.body.innerHTML = `
+      <ul id="root">
+        <li data-index="0" tabindex="0">0</li>
+        <li data-index="1" tabindex="-1">1</li>
+        <li data-index="2" tabindex="-1">2</li>
+      </ul>`;
+    return byId("root");
+  }
+
+  it("renders via the awaited tick (scrollToIndex defers, tick flushes)", async () => {
+    const root = baseMarkup();
+    // scrollToIndex only records intent; the row appears solely because tick()
+    // flushes it. If Tabspot didn't await tick, the node would never be found.
+    let pending: number | null = null;
+    const adapter: VirtualAdapter = {
+      count: () => TOTAL,
+      scrollToIndex: (i) => {
+        pending = i;
+      },
+      tick: () => {
+        if (pending !== null) renderRow(root, pending);
+        pending = null;
+        return Promise.resolve();
+      },
+    };
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, adapter);
+
+    press(root.querySelector('[data-index="2"]') as HTMLElement, "ArrowDown");
+    await tick();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("3");
+  });
+
+  it("falls back to the observer when tick resolves before the row renders", async () => {
+    const root = baseMarkup();
+    // A scroll-event-driven virtualizer: the row lands a tick later than the
+    // flush hook resolves, so the MutationObserver safety net must catch it.
+    const adapter: VirtualAdapter = {
+      count: () => TOTAL,
+      scrollToIndex: (i) => {
+        setTimeout(() => renderRow(root, i), 5);
+      },
+      tick: () => Promise.resolve(),
+    };
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, adapter);
+
+    press(root.querySelector('[data-index="2"]') as HTMLElement, "ArrowDown");
+    await tick();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("3");
   });
 });
 

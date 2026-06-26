@@ -220,12 +220,14 @@ import { tabspotVirtual } from "tabspot";
 const detach = tabspotVirtual(listEl, {
   scrollToIndex: (index) => rowVirtualizer.scrollToIndex(index), // sync or async
   count: () => total, // or omit and use aria-setsize/aria-rowcount
+  tick: () => nextTick(), // optional: Vue nextTick / Svelte tick / etc.
 });
 // cleanup: detach()
 ```
 
 - Each rendered item carries its real index via `data-index` (preferred) or `aria-posinset` / `aria-rowindex`; the total via `aria-setsize` / `aria-rowcount` or `adapter.count()`.
 - When an arrow clamps at the rendered edge, Tabspot calls `scrollToIndex(target)`, waits for that index to render, then activates it (with coalescing for held keys).
+- By default the render wait uses a `MutationObserver` bounded by a ~1s timeout. Provide `tick` (a `() => Promise<void>` such as Vue's `nextTick` or Svelte's `tick`) and Tabspot awaits your framework's render flush instead — no timeout in the happy path. If the row still isn't rendered when `tick` resolves, it falls back to the observer.
 - For grids, rows are virtualized by `data-index` on the `<tr>` and the column is preserved via `data-colindex` on cells.
 - Use `activation: "activedescendant"` or `"controlled"` for virtual lists — `"focus"` is fragile because a focused row can unmount on scroll.
 - `tabspotVirtual` is keyed by element (no instance argument) and tree-shakeable.
