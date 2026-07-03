@@ -15,6 +15,14 @@ export interface VirtualAdapter {
   scrollToIndex(index: number): void | Promise<void>;
   /** Total real item count. Falls back to aria-setsize/aria-rowcount. */
   count?(): number;
+  /**
+   * Resolves once the framework has flushed pending DOM updates
+   * (Vue `nextTick`, Svelte `tick`, Angular `afterNextRender`, …). When
+   * provided, Tabspot awaits it after `scrollToIndex` instead of polling for
+   * the row to appear. If the row still isn't rendered once it resolves,
+   * Tabspot falls back to the MutationObserver/timeout wait.
+   */
+  tick?(): Promise<void>;
 }
 
 /** What a boundary-crossing navigation is trying to reach, by real index. */
@@ -89,15 +97,42 @@ export function findVirtualTarget(rootEl: HTMLElement, target: VirtualTarget): H
   return cell instanceof HTMLElement ? cell : null;
 }
 
-/** Resolve once `[data-index=dataIndex]` exists under `rootEl` (with timeout). */
+/**
+ * Resolve once `[data-index=dataIndex]` exists under `rootEl`.
+ *
+ * When `tick` is given, await the framework's render flush and check once; if
+ * the row is there we're done with no timer. Otherwise (or if `tick` left it
+ * unrendered) fall back to a MutationObserver bounded by `timeoutMs`.
+ */
 export function waitForRendered(
   rootEl: HTMLElement,
   dataIndex: number,
   timeoutMs: number,
+  tick?: () => Promise<void>,
 ): Promise<HTMLElement | null> {
   const sel = `[data-index="${dataIndex}"]`;
-  const present = rootEl.querySelector(sel);
-  if (present instanceof HTMLElement) return Promise.resolve(present);
+  const find = (): HTMLElement | null => {
+    const el = rootEl.querySelector(sel);
+    return el instanceof HTMLElement ? el : null;
+  };
+  const present = find();
+  if (present) return Promise.resolve(present);
+  if (tick) {
+    return tick().then(() => {
+      // tick resolved but the row isn't here yet (e.g. a scroll-event-driven
+      // virtualizer recomputes a frame later): fall back to the observer.
+      return find() ?? observeForRendered(rootEl, sel, timeoutMs);
+    });
+  }
+  return observeForRendered(rootEl, sel, timeoutMs);
+}
+
+/** Resolve once `sel` matches under `rootEl` via MutationObserver, else null after `timeoutMs`. */
+function observeForRendered(
+  rootEl: HTMLElement,
+  sel: string,
+  timeoutMs: number,
+): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
     let done = false;
     const finish = (el: HTMLElement | null) => {
