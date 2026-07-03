@@ -1,5 +1,15 @@
 # tabspot
 
+## 0.4.0
+
+### Minor Changes
+
+- [#13](https://github.com/JLAcostaEC/tabspot/pull/13) [`9947594`](https://github.com/JLAcostaEC/tabspot/commit/9947594bddf01c93b3c764be2ebaf1c6924036e0) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - feat: add optional `tick` hook on the virtual adapter to await a framework's render flush
+
+### Patch Changes
+
+- [#10](https://github.com/JLAcostaEC/tabspot/pull/10) [`31c456a`](https://github.com/JLAcostaEC/tabspot/commit/31c456a15c7dcc3ff67f9bd81aa4bc9068228f08) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - fix: cyclic wrap on a virtualized list
+
 ## 0.3.1
 
 ### Patch Changes
