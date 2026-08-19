@@ -306,15 +306,18 @@ interface NavExtra {
   atRenderedBoundary?: boolean;
 }
 
-/** Build the index/grid context fields for a navigation event. */
-function navExtra(compiled: CompiledRoot, from: FocusableNode, to: FocusableNode): NavExtra {
-  const fromIndex = compiled.focusables.indexOf(from);
+/**
+ * Build the index/grid context fields for a navigation event. `from` is null on
+ * an entry move (the cursor was empty, see `handleEntry`).
+ */
+function navExtra(compiled: CompiledRoot, from: FocusableNode | null, to: FocusableNode): NavExtra {
+  const fromIndex = from ? compiled.focusables.indexOf(from) : -1;
   const toIndex = compiled.focusables.indexOf(to);
   let grid: NavExtra["grid"];
   const mover = effectiveMover(to);
   if (mover && isGridMover(mover)) {
     const layout = getGridLayout(compiled, levelContainer(to), mover.rows);
-    grid = { from: layout.pos.get(from) ?? null, to: layout.pos.get(to) ?? null };
+    grid = { from: from ? (layout.pos.get(from) ?? null) : null, to: layout.pos.get(to) ?? null };
   }
   return {
     fromIndex: fromIndex < 0 ? undefined : fromIndex,
@@ -360,8 +363,11 @@ export interface NavigationDeps {
   listener: TabspotEventListener | undefined;
   /** Resolve the current focusable from the keydown target (activation-aware). */
   resolveCurrent: (target: HTMLElement) => FocusableNode | null;
-  /** Apply a move's side effect: focus / aria marker / nothing, + track active. */
-  applyMove: (from: FocusableNode, to: FocusableNode) => void;
+  /**
+   * Apply a move's side effect: focus / aria marker / nothing, + track active.
+   * `from` is null when the move enters the root with an empty cursor.
+   */
+  applyMove: (from: FocusableNode | null, to: FocusableNode) => void;
 }
 
 /**
@@ -372,7 +378,9 @@ export function handleKeydown(event: KeyboardEvent, deps: NavigationDeps): boole
   const target = event.target;
   if (!(target instanceof HTMLElement)) return false;
   const focusable = deps.resolveCurrent(target);
-  if (!focusable) return false;
+  // No cursor yet (a non-`focus` root that nobody has navigated): enter from
+  // outside instead of moving.
+  if (!focusable) return handleEntry(event, deps);
 
   const rootOpts = deps.compiled.root.opts;
   const key = event.key;
@@ -398,6 +406,44 @@ export function handleKeydown(event: KeyboardEvent, deps: NavigationDeps): boole
   const dir = KEY_TO_DIR[key];
   if (!dir) return false;
   return handleArrow(focusable, dir, deps, event);
+}
+
+/**
+ * Enter a root that has no current item, from outside it.
+ *
+ * Only non-`focus` roots reach this: with `activation: "focus"` the cursor IS
+ * DOM focus and the entry point is `Tab` (roving tabindex), so nothing is
+ * seeded and nothing is entered here. For the rest the cursor starts empty —
+ * a forward key (`ArrowDown`/`ArrowRight`, mirrored under RTL, plus `Home`)
+ * lands on the first item, a backward key (plus `End`) on the last. Linear
+ * movers only enter on their own axis; grid movers enter on any arrow.
+ */
+function handleEntry(event: KeyboardEvent, deps: NavigationDeps): boolean {
+  const compiled = deps.compiled;
+  if (compiled.activation.mode === "focus") return false;
+
+  const mover = compiled.root.mover;
+  const key = event.key;
+  if (mover?.ignoreKeys?.includes(key as ManagedKey)) return false;
+
+  let forward: boolean;
+  let direction: NavDirection;
+  const dir = KEY_TO_DIR[key];
+  if (dir) {
+    // Cross-axis on a linear mover is grouper territory, never an entry.
+    if (!mover || (!isGridMover(mover) && mover.axis !== directionAxis(dir))) return false;
+    forward = isForward(dir, compiled.rtl);
+    direction = dir;
+  } else if ((key === "Home" || key === "End") && managesSpecialKey(compiled.root.opts, key)) {
+    forward = key === "Home";
+    direction = forward ? "home" : "end";
+  } else {
+    return false;
+  }
+
+  const sibs = getLevelFocusables(compiled, compiled.root);
+  const to = forward ? firstVisible(sibs, mover) : lastVisible(sibs, mover);
+  return performMove(null, to, direction, event, deps);
 }
 
 function handleArrow(
@@ -670,8 +716,9 @@ function handlePage(
   return performMove(focusable, target, down ? "pagedown" : "pageup", rawEvent, deps);
 }
 
+/** `from` is null only for an entry move (empty cursor, see `handleEntry`). */
 function performMove(
-  from: FocusableNode,
+  from: FocusableNode | null,
   to: FocusableNode | null,
   direction: NavDirection,
   rawEvent: KeyboardEvent,
@@ -683,7 +730,7 @@ function performMove(
     deps.listener,
     direction,
     rawEvent.key,
-    from.el,
+    from?.el ?? null,
     to.el,
     compiled.root.el,
     to.level,

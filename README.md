@@ -209,6 +209,15 @@ for "current within a set" like pagination).
 
 > Tabspot only writes the navigation-coupled state above (`tabindex`, `aria-activedescendant`, the active marker). Static roles (`role="grid"`, `role="listbox"`, …) and widget state remain the author's responsibility.
 
+### Clearing the cursor
+
+A non-`focus` root has **no active item** when it registers: nothing is marked and
+no `aria-activedescendant` is published until the user navigates.
+
+Call `clearTabspotActive(root)` to go back to an empty cursor without unregistering
+the root — e.g. when the popup closes or the query changes and no suggestion should
+read as chosen. It clears the mark and the controller's `aria-activedescendant`.
+
 ## Virtualization
 
 Tabspot navigates the DOM, not your data model. For windowed lists/grids, expose the real index declaratively and the scroll imperatively:
@@ -243,6 +252,7 @@ const detach = tabspotVirtual(listEl, {
 | `setTabspotAttributesBatch(items)` | Apply many `setTabspotAttributes` at once; a result per entry. |
 | `unsetTabspotSection(el, section)` | Remove one section (merge can't clear a section). |
 | `getTabspotAttributes(config)` | Pure helper — returns `{ "data-tabspot": "…" }` for SSR. |
+| `clearTabspotActive(el)` | Empty a non-`focus` root's cursor (clears the mark + `aria-activedescendant`). |
 
 ### `setTabspotAttributes` result
 

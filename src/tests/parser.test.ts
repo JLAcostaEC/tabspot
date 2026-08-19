@@ -20,7 +20,9 @@ describe("parser", () => {
 
   it("accepts per-key manageSpecialKeys toggles", () => {
     expect(
-      parseTabspotAttribute('{"root":{"manageSpecialKeys":{"Home":true,"End":false,"PageDown":true}}}'),
+      parseTabspotAttribute(
+        '{"root":{"manageSpecialKeys":{"Home":true,"End":false,"PageDown":true}}}',
+      ),
     ).toEqual({
       root: { manageSpecialKeys: { Home: true, End: false, PageDown: true } },
     });

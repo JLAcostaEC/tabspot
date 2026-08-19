@@ -43,6 +43,8 @@ export interface Engine {
   markRootDirty(rootEl: HTMLElement): void;
   /** True if `el`'s tabindex is currently managed by roving (observer ignores it). */
   isRovingManaged(el: HTMLElement): boolean;
+  /** Empty the cursor of a registered non-`focus` root. False if not applicable. */
+  clearActive(el: HTMLElement): boolean;
   observerApi(): TabspotObserverAPI;
 }
 
@@ -109,20 +111,21 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
         rovingManager.unregister(rootEl);
       }
     } else {
-      // Non-focus activation: track an initial active item + marker, and record
-      // the controller so keydown on it routes here.
+      // Non-focus activation: record the controller so keydown on it routes
+      // here. The cursor stays EMPTY until the user navigates — registering a
+      // root must not publish `aria-activedescendant` or a mark on its own
+      // (the first arrow / Home / End enters the list, see `handleEntry`).
       rovingManager.unregister(rootEl);
       if (compiled.activation.controller) {
         controllers.set(rootEl, compiled.activation.controller);
       } else {
         controllers.delete(rootEl);
       }
-      if (!activationManager.getActive(rootEl)) {
-        activationManager.setActive(
-          rootEl,
-          compiled.activation,
-          compiled.focusables[0]?.el ?? null,
-        );
+      // Drop a cursor left on an item this build no longer knows (removed from
+      // the DOM, or no longer matched by `items`), clearing its marker with it.
+      const active = activationManager.getActive(rootEl);
+      if (active && !compiled.byElement.has(active)) {
+        activationManager.setActive(rootEl, compiled.activation, null);
       }
     }
     return compiled;
@@ -135,7 +138,9 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       listener: state.listener,
       resolveCurrent: (target) => {
         if (compiled.activation.mode === "focus") return compiled.byElement.get(target) ?? null;
-        const active = activationManager.getActive(rootEl) ?? compiled.focusables[0]?.el ?? null;
+        // No fallback to the first item: an empty cursor stays empty, so the
+        // next key enters the root instead of moving off an implied position.
+        const active = activationManager.getActive(rootEl);
         return active ? (compiled.byElement.get(active) ?? null) : null;
       },
       applyMove: (_from, to) => {
@@ -264,6 +269,13 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       }
     },
     isRovingManaged: (el) => rovingManager.isManaged(el),
+    clearActive(el) {
+      const compiled = state.roots.get(el);
+      if (!compiled || compiled.activation.mode === "focus") return false;
+      activationManager.setActive(el, compiled.activation, null);
+      logger.full("active cleared", { el });
+      return true;
+    },
     observerApi: () => state.reactor.api(),
   };
 
@@ -377,6 +389,22 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
   singleton = { engine, state };
   logger.basic("engine started", { options });
   return instance;
+}
+
+/**
+ * Empty the cursor ("active item") of a non-`focus` root: removes the mark and
+ * the controller's `aria-activedescendant`, without unregistering anything.
+ *
+ * The root keeps working — the next arrow (or `Home`/`End`) enters it from
+ * outside again: forward keys land on the first item, backward keys on the
+ * last. Useful when the widget closes or its query changes and no suggestion
+ * should read as chosen.
+ *
+ * Returns false when `root` is not a registered root or uses `focus`
+ * activation, where the cursor is DOM focus and Tabspot does not own it.
+ */
+export function clearTabspotActive(root: HTMLElement): boolean {
+  return getEngine()?.clearActive(root) ?? false;
 }
 
 export function tabspotObserver(instance: TabspotInstance): TabspotObserverAPI {
