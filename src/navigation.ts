@@ -110,7 +110,7 @@ function levelContainer(node: FocusableNode): ContainerNode {
  * carries a real index. When true, the cyclic wrap must be deferred so it lands
  * on the real first/last item instead of the first/last *rendered* one.
  */
-function virtualHandlesBoundary(
+export function virtualHandlesBoundary(
   focusable: FocusableNode,
   compiled: CompiledRoot,
   dir: EnterExitDirections,
@@ -304,6 +304,7 @@ interface NavExtra {
   toIndex?: number;
   grid?: { from: GridCell | null; to: GridCell | null };
   atRenderedBoundary?: boolean;
+  atEdge?: boolean;
 }
 
 /**
@@ -536,7 +537,7 @@ function moveSibling(
   if (idx === -1) return false;
   const forward = isForward(dir, deps.compiled.rtl);
   const next = pickNextVisible(sibs, idx, forward, mover, allowCyclic);
-  if (!next) return false;
+  if (!next) return reportEdge(focusable, dir, deps, rawEvent);
   return performMove(focusable, next, dir, rawEvent, deps);
 }
 
@@ -580,6 +581,7 @@ function handleGridArrow(
     // grid horizontal: stay inside the current row.
     const row = layout.rows[at.row]!;
     const next = pickNextVisible(row, at.col, forward, mover, cyclic);
+    if (!next) return reportEdge(focusable, dir, deps, rawEvent);
     return performMove(focusable, next, dir, rawEvent, deps);
   }
 
@@ -587,6 +589,7 @@ function handleGridArrow(
   // clamping the index to each row's width so ragged rows still resolve.
   const column = layout.rows.map((row) => row[Math.min(at.col, row.length - 1)]!);
   const next = pickNextVisible(column, at.row, forward, mover, cyclic);
+  if (!next) return reportEdge(focusable, dir, deps, rawEvent);
   return performMove(focusable, next, dir, rawEvent, deps);
 }
 
@@ -716,6 +719,58 @@ function handlePage(
   return performMove(focusable, target, down ? "pagedown" : "pageup", rawEvent, deps);
 }
 
+/**
+ * Report that a move ran out of items in `dir`: dispatch a navigation event
+ * with `to: null` and `atEdge`, without moving anything. Returns true when a
+ * listener cancelled it, meaning it claimed the key.
+ *
+ * "Ran out of items" is domain information (flip the page, hand the query back,
+ * load more) that the engine can't act on, so it has to leave the engine.
+ */
+export function emitEdge(
+  deps: NavigationDeps,
+  from: FocusableNode,
+  direction: EnterExitDirections,
+  key: string,
+): boolean {
+  const compiled = deps.compiled;
+  const fromIndex = compiled.focusables.indexOf(from);
+  let grid: NavExtra["grid"];
+  const mover = effectiveMover(from);
+  if (mover && isGridMover(mover)) {
+    const layout = getGridLayout(compiled, levelContainer(from), mover.rows);
+    grid = { from: layout.pos.get(from) ?? null, to: null };
+  }
+  const ev = dispatchNavigation(
+    deps.listener,
+    direction,
+    key,
+    from.el,
+    null,
+    compiled.root.el,
+    from.level,
+    { fromIndex: fromIndex < 0 ? undefined : fromIndex, grid, atEdge: true },
+  );
+  return ev.cancelled;
+}
+
+/**
+ * Edge report for an in-DOM clamp. Deferred at a virtualized boundary: there
+ * the rendered edge is not the real one, so core's virtual layer either
+ * continues the move or reports the edge once it knows nothing lies beyond.
+ */
+function reportEdge(
+  focusable: FocusableNode,
+  dir: EnterExitDirections,
+  deps: NavigationDeps,
+  rawEvent: KeyboardEvent,
+): boolean {
+  if (virtualHandlesBoundary(focusable, deps.compiled, dir)) return false;
+  if (!emitEdge(deps, focusable, dir, rawEvent.key)) return false;
+  rawEvent.preventDefault();
+  return true;
+}
+
 /** `from` is null only for an entry move (empty cursor, see `handleEntry`). */
 function performMove(
   from: FocusableNode | null,
@@ -796,10 +851,14 @@ export function resolveBoundaryTarget(
 /**
  * Commit a move that landed after a virtual scroll (no raw key event). Dispatches
  * the navigation event (flagged `atRenderedBoundary`) and applies the effect.
+ *
+ * `from` may be null: the origin row can unmount while the list scrolls, and it
+ * only feeds the event payload — dropping the whole move because of it loses a
+ * keystroke the user did make.
  */
 export function commitVirtual(
   deps: NavigationDeps,
-  from: FocusableNode,
+  from: FocusableNode | null,
   to: FocusableNode,
   direction: EnterExitDirections,
 ): void {
@@ -807,7 +866,7 @@ export function commitVirtual(
     deps.listener,
     direction,
     "",
-    from.el,
+    from?.el ?? null,
     to.el,
     deps.compiled.root.el,
     to.level,

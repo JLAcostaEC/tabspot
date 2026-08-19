@@ -2,10 +2,12 @@ import { ActivationManager } from "./activation.ts";
 import { createLogger, type Logger } from "./debug.ts";
 import {
   commitVirtual,
+  emitEdge,
   handleKeydown,
   keyToDirection,
   type NavigationDeps,
   resolveBoundaryTarget,
+  virtualHandlesBoundary,
 } from "./navigation.ts";
 import { DomReactor } from "./observer.ts";
 import { readTabspotConfig, TABSPOT_ATTR } from "./parser.ts";
@@ -22,6 +24,7 @@ import type {
   EnterExitDirections,
   TabspotEventListener,
   TabspotInstance,
+  TabspotNavigationEvent,
   TabspotObserverAPI,
   TabspotOptions,
   TabspotRootOptions,
@@ -48,9 +51,17 @@ export interface Engine {
   observerApi(): TabspotObserverAPI;
 }
 
+/** An additive navigation subscriber; `root` null means "every root". */
+interface Subscriber {
+  root: HTMLElement | null;
+  fn: TabspotEventListener;
+}
+
 interface EngineState {
   options: TabspotOptions;
+  /** The single `options.onNavigate` slot; see `subscribers` for the additive ones. */
   listener: TabspotEventListener | undefined;
+  subscribers: Set<Subscriber>;
   logger: Logger;
   roots: Map<HTMLElement, CompiledRoot>;
   reactor: DomReactor;
@@ -131,11 +142,22 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     return compiled;
   }
 
+  // Fan a navigation event out to the `onNavigate` slot and every subscriber
+  // interested in this root. The event object is shared, so a `preventDefault()`
+  // from any of them cancels the move for all.
+  function notify(ev: TabspotNavigationEvent): void {
+    state.listener?.(ev);
+    // Copy: a subscriber may detach itself while being notified.
+    for (const sub of Array.from(state.subscribers)) {
+      if (sub.root === null || sub.root === ev.root) sub.fn(ev);
+    }
+  }
+
   // Build the activation-aware navigation deps for a root.
   function makeDeps(rootEl: HTMLElement, compiled: CompiledRoot): NavigationDeps {
     return {
       compiled,
-      listener: state.listener,
+      listener: notify,
       resolveCurrent: (target) => {
         if (compiled.activation.mode === "focus") return compiled.byElement.get(target) ?? null;
         // No fallback to the first item: an empty cursor stays empty, so the
@@ -176,9 +198,18 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     // resolveBoundaryTarget clamps/wraps against `total`: out-of-range non-cyclic
     // edges return null; cyclic edges wrap to the opposite real end.
     const vt = resolveBoundaryTarget(current, compiled, ev.key, total);
-    if (!vt) return;
-    const idx = vt.kind === "linear" ? vt.index : vt.row;
     const dir = keyToDirection(ev.key);
+    if (!vt) {
+      // `resolveBoundaryTarget` returns null for several reasons, and only one
+      // of them is an edge: the real first/last item. Gate on the very predicate
+      // navigation used to defer to us, so a cross-axis key reports nothing and
+      // a boundary navigation already reported is not reported twice.
+      if (dir && virtualHandlesBoundary(current, compiled, dir)) {
+        if (emitEdge(deps, current, dir, ev.key)) ev.preventDefault();
+      }
+      return;
+    }
+    const idx = vt.kind === "linear" ? vt.index : vt.row;
     if (!dir) return;
     ev.preventDefault();
     pendingVirtual.set(rootEl, idx);
@@ -210,15 +241,18 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     state.roots.set(rootEl, compiled);
     const targetEl = findVirtualTarget(rootEl, vt);
     if (!targetEl) return;
-    const from = compiled.byElement.get(fromEl);
     const to = compiled.byElement.get(targetEl);
-    if (!from || !to) return;
+    if (!to) return;
+    // The origin row may have unmounted while the list scrolled; it only feeds
+    // the event payload, so a missing one must not drop the move.
+    const from = compiled.byElement.get(fromEl) ?? null;
     commitVirtual(makeDeps(rootEl, compiled), from, to, dir);
   }
 
   const state: EngineState = {
     options,
     listener: options.onNavigate,
+    subscribers: new Set(),
     logger,
     roots: new Map(),
     reactor: undefined as unknown as DomReactor,
@@ -297,6 +331,20 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       if (next.debug !== undefined) state.logger.level = next.debug;
       if ("onNavigate" in next) state.listener = next.onNavigate;
     },
+    subscribe(
+      rootOrListener: HTMLElement | TabspotEventListener,
+      maybeListener?: TabspotEventListener,
+    ): () => void {
+      const sub: Subscriber =
+        typeof rootOrListener === "function"
+          ? { root: null, fn: rootOrListener }
+          : { root: rootOrListener, fn: maybeListener as TabspotEventListener };
+      state.subscribers.add(sub);
+      logger.full("navigation subscriber added", { root: sub.root });
+      return () => {
+        state.subscribers.delete(sub);
+      };
+    },
     destroy() {
       document.removeEventListener("keydown", state.onKeydown, true);
       document.removeEventListener("focusin", state.onFocusIn, true);
@@ -307,6 +355,7 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       pendingVirtual.clear();
       state.roots.clear();
       state.listener = undefined;
+      state.subscribers.clear();
       logger.basic("destroyed");
       singleton = null;
     },
