@@ -1,4 +1,4 @@
-export { tabspot, tabspotObserver } from "./core.ts";
+export { clearTabspotActive, tabspot, tabspotObserver } from "./core.ts";
 export {
   getTabspotAttributes,
   setTabspotAttributes,
