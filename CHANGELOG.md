@@ -1,5 +1,35 @@
 # tabspot
 
+## 0.5.0
+
+### Minor Changes
+
+- [#18](https://github.com/JLAcostaEC/tabspot/pull/18) [`267379d`](https://github.com/JLAcostaEC/tabspot/commit/267379d2e860868e7896f2472b8d15cce60113bf) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - fix: a non-focus root only takes keys from its activation controller
+
+  `activedescendant`, `marked` and `controlled` roots track a cursor that does not
+  follow DOM focus, so a keydown anywhere in the root subtree used to drive it.
+  An arrow pressed inside a descendant that owns its own arrows — a filter input,
+  a slider, a nested widget — moved the cursor on top of the control's own action.
+
+  Keys are now handled only when they come from the root's activation controller:
+  the configured `controller` in `activedescendant`, the root element itself in
+  `marked` and `controlled`. `focus` roots are unaffected — their cursor is DOM
+  focus, which already resolves from the event target.
+
+- [#16](https://github.com/JLAcostaEC/tabspot/pull/16) [`acb7917`](https://github.com/JLAcostaEC/tabspot/commit/acb7917a89cdc0e5b82a36b6e2a48ec38873647d) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - feat: a non-focus root no longer selects its first item on registration
+
+  Registering a root whose mover uses `activedescendant`, `marked` or `controlled`
+  activation used to make the first item current straight away, publishing
+  `aria-activedescendant` on the controller and marking an option nobody chose.
+  The cursor now starts (and stays) empty until the user navigates: the first
+  arrow enters the list from outside — a forward key lands on the first item, a
+  backward key on the last — and `Home`/`End` do the same where the root manages
+  them.
+
+  Adds `clearTabspotActive(root)` to empty the cursor again without unregistering
+  the root, so a widget that closes (or whose query changes) can drop the marker
+  and the `aria-activedescendant` it published.
+
 ## 0.4.0
 
 ### Minor Changes
