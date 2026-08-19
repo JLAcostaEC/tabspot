@@ -326,6 +326,14 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       state.roots.set(rootEl, next);
       compiled = next;
     }
+    // A non-`focus` root takes keys ONLY from its activation controller (the
+    // root element itself for `marked`/`controlled`). Without this, a key
+    // pressed in any descendant that owns its arrows would drive the list
+    // on top of its own action. Also covers the virtual path below.
+    if (compiled.activation.mode !== "focus" && target !== compiled.activation.controller) {
+      logger.full("keydown ignored: target is not the activation controller", { target, rootEl });
+      return;
+    }
     const handled = handleKeydown(ev, makeDeps(rootEl, compiled));
     if (handled) {
       ev.preventDefault();
