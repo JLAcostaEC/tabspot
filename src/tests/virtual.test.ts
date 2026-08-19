@@ -334,3 +334,81 @@ describe("virtualization: the real end of the list reports an edge", () => {
     expect(events.at(-1)?.to).toBeNull();
   });
 });
+
+describe("virtualization: only a real boundary reports an edge", () => {
+  const TOTAL = 100;
+
+  function mountLinear(): void {
+    document.body.innerHTML = `
+      <ul id="root">
+        <li data-index="98" tabindex="-1">98</li>
+        <li data-index="99" tabindex="-1">99</li>
+      </ul>`;
+    const root = byId("root");
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, { count: () => TOTAL, scrollToIndex: (i) => renderRow(root, i) });
+  }
+
+  it("a cross-axis key on a vertical virtual root reports nothing", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    mountLinear();
+    instance.subscribe((e) => events.push(e));
+    // ArrowRight is grouper territory, never an edge — but it also makes
+    // resolveBoundaryTarget return null, which used to be read as "real edge".
+    press(byId("root").querySelector('[data-index="99"]') as HTMLElement, "ArrowRight");
+    await tick();
+    expect(events).toEqual([]);
+  });
+
+  it("the real last row reports the edge exactly once", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    mountLinear();
+    instance.subscribe((e) => events.push(e));
+    press(byId("root").querySelector('[data-index="99"]') as HTMLElement, "ArrowDown");
+    await tick();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.atEdge).toBe(true);
+  });
+
+  it("a row without a real index reports the edge once (navigation owns it)", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    document.body.innerHTML = `
+      <ul id="root">
+        <li tabindex="-1">a</li>
+        <li tabindex="-1">b</li>
+      </ul>`;
+    const root = byId("root");
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, { count: () => TOTAL, scrollToIndex: (i) => renderRow(root, i) });
+    instance.subscribe((e) => events.push(e));
+    press(root.querySelectorAll("li")[1] as HTMLElement, "ArrowDown");
+    await tick();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.atEdge).toBe(true);
+  });
+
+  it("a grid's horizontal edge reports once (columns are not virtualized)", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    document.body.innerHTML = `
+      <table id="t"><tbody id="tb">
+        <tr data-index="0"><td data-colindex="0">0,0</td><td data-colindex="1">0,1</td></tr>
+      </tbody></table>`;
+    const root = byId("t");
+    instance = tabspot();
+    setTabspotAttributes({
+      element: root,
+      config: {
+        root: {},
+        mover: { layout: "grid", items: "td", rows: { by: "selector", row: "tr" } },
+      },
+    });
+    detach = tabspotVirtual(root, { count: () => TOTAL, scrollToIndex: () => {} });
+    instance.subscribe((e) => events.push(e));
+    press(root.querySelector('[data-colindex="1"]') as HTMLElement, "ArrowRight");
+    await tick();
+    expect(events).toHaveLength(1);
+    expect(events[0]!.atEdge).toBe(true);
+  });
+});

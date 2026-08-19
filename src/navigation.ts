@@ -110,7 +110,7 @@ function levelContainer(node: FocusableNode): ContainerNode {
  * carries a real index. When true, the cyclic wrap must be deferred so it lands
  * on the real first/last item instead of the first/last *rendered* one.
  */
-function virtualHandlesBoundary(
+export function virtualHandlesBoundary(
   focusable: FocusableNode,
   compiled: CompiledRoot,
   dir: EnterExitDirections,

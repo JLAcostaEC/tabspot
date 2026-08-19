@@ -7,6 +7,7 @@ import {
   keyToDirection,
   type NavigationDeps,
   resolveBoundaryTarget,
+  virtualHandlesBoundary,
 } from "./navigation.ts";
 import { DomReactor } from "./observer.ts";
 import { readTabspotConfig, TABSPOT_ATTR } from "./parser.ts";
@@ -199,9 +200,13 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     const vt = resolveBoundaryTarget(current, compiled, ev.key, total);
     const dir = keyToDirection(ev.key);
     if (!vt) {
-      // Nothing beyond the rendered window either: this is the REAL edge, and
-      // navigation deferred reporting it to us (see `reportEdge`).
-      if (dir && emitEdge(deps, current, dir, ev.key)) ev.preventDefault();
+      // `resolveBoundaryTarget` returns null for several reasons, and only one
+      // of them is an edge: the real first/last item. Gate on the very predicate
+      // navigation used to defer to us, so a cross-axis key reports nothing and
+      // a boundary navigation already reported is not reported twice.
+      if (dir && virtualHandlesBoundary(current, compiled, dir)) {
+        if (emitEdge(deps, current, dir, ev.key)) ev.preventDefault();
+      }
       return;
     }
     const idx = vt.kind === "linear" ? vt.index : vt.row;

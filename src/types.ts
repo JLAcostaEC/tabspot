@@ -209,10 +209,11 @@ export interface TabspotInstance {
   rebuild(rootEl?: HTMLElement): void;
   update(next: Partial<TabspotOptions>): void;
   /**
-   * Listen to navigation events. Unlike `options.onNavigate` — a single slot
-   * that the next `tabspot()` call overwrites — subscribers are additive, so a
-   * component can listen without stealing the app's listener. Pass a root to
-   * receive only that root's events. Returns a detach function.
+   * Listen to navigation events. Unlike `options.onNavigate` — a single slot,
+   * replaced by any later `tabspot()` call that passes an `onNavigate` property
+   * (calls that omit it leave the current listener alone) — subscribers are
+   * additive, so a component can listen without stealing the app's listener.
+   * Pass a root to receive only that root's events. Returns a detach function.
    */
   subscribe(listener: TabspotEventListener): () => void;
   subscribe(root: HTMLElement, listener: TabspotEventListener): () => void;

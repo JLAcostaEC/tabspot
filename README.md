@@ -292,7 +292,8 @@ tabspot({
 
 ### `instance.subscribe` — additive listeners
 
-`options.onNavigate` is a **single slot**: the next `tabspot()` call overwrites it, so a component
+`options.onNavigate` is a **single slot**: any later `tabspot()` call that passes an `onNavigate`
+property replaces it (calls that omit the property leave the current listener alone), so a component
 that sets it steals the app's listener. `subscribe` is additive instead — everyone who signs up is
 called — and returns a detach function. Pass a root to hear only that root:
 
