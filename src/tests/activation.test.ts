@@ -453,3 +453,73 @@ describe("issue #15: a non-focus root must not seed a cursor on registration", (
     expect(byId("opt-apple").getAttribute("data-active")).toBe("true");
   });
 });
+
+describe("a non-focus root takes keys only from its activation controller", () => {
+  it("ignores arrows pressed inside an unrelated descendant (activedescendant)", () => {
+    document.body.innerHTML = `
+      <input id="cb" />
+      <ul id="lb">
+        <li id="o1">A</li>
+        <li id="o2">B</li>
+        <li><input id="filter" /></li>
+      </ul>`;
+    instance = tabspot();
+    setTabspotAttributes({
+      element: byId("lb"),
+      config: {
+        root: {},
+        mover: {
+          axis: "vertical",
+          items: "li",
+          activation: { mode: "activedescendant", controller: "#cb" },
+        },
+      },
+    });
+
+    // Entry does not fire from the inner input…
+    byId("filter").focus();
+    key(byId("filter"), "ArrowDown");
+    expect(byId("cb").getAttribute("aria-activedescendant")).toBeNull();
+
+    // …nor does a move once the controller has set a cursor.
+    key(byId("cb"), "ArrowDown");
+    expect(byId("cb").getAttribute("aria-activedescendant")).toBe("o1");
+    key(byId("filter"), "ArrowDown");
+    expect(byId("cb").getAttribute("aria-activedescendant")).toBe("o1");
+  });
+
+  it("in marked/controlled the controller is the root element itself", () => {
+    document.body.innerHTML = `
+      <ul id="root">
+        <li id="a">A</li>
+        <li id="b">B</li>
+        <li><input id="filter" /></li>
+      </ul>`;
+    instance = tabspot();
+    setTabspotAttributes({
+      element: byId("root"),
+      config: { root: {}, mover: { axis: "vertical", items: "li", activation: "marked" } },
+    });
+
+    key(byId("filter"), "ArrowDown");
+    expect(active()).toBeNull(); // the input owns its arrows
+
+    key(byId("root"), "ArrowDown");
+    expect(active()).toBe("a"); // the root does drive the list
+    key(byId("filter"), "ArrowDown");
+    expect(active()).toBe("a"); // still parked where the root left it
+  });
+
+  it("leaves focus roots alone (their cursor already follows the target)", () => {
+    document.body.innerHTML = `
+      <ul id="root"><li id="a" tabindex="0">A</li><li id="b" tabindex="-1">B</li></ul>`;
+    instance = tabspot();
+    setTabspotAttributes({
+      element: byId("root"),
+      config: { root: {}, mover: { axis: "vertical" } },
+    });
+    byId("a").focus();
+    key(byId("a"), "ArrowDown");
+    expect(document.activeElement).toBe(byId("b"));
+  });
+});
