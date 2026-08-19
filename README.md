@@ -271,6 +271,8 @@ if (res.ok) {
 instance.update({ debug: "full", onNavigate(ev) { … } });
 instance.rebuild();       // force-rebuild every registered root
 instance.rebuild(rootEl); // force-rebuild a specific root
+instance.subscribe(fn);        // additive navigation listener → detach fn
+instance.subscribe(rootEl, fn) // …scoped to one root
 instance.destroy();       // stop the engine; restore managed tabindex; leave data-tabspot intact
 ```
 
@@ -281,11 +283,48 @@ Fires for every move (arrow / home / end / pageup / pagedown / escape). Call `ev
 ```ts
 tabspot({
   onNavigate(ev) {
-    // ev: { direction, key, from, to, root, level, fromIndex?, toIndex?, grid?, atRenderedBoundary? }
+    // ev: { direction, key, from, to, root, level, fromIndex?, toIndex?, grid?,
+    //       atRenderedBoundary?, atEdge? }
     if (ev.direction === "escape") ev.preventDefault();
   },
 });
 ```
+
+### `instance.subscribe` — additive listeners
+
+`options.onNavigate` is a **single slot**: the next `tabspot()` call overwrites it, so a component
+that sets it steals the app's listener. `subscribe` is additive instead — everyone who signs up is
+called — and returns a detach function. Pass a root to hear only that root:
+
+```ts
+const off = instance.subscribe(listEl, (ev) => {
+  active = ev.to;
+});
+// on unmount:
+off();
+
+instance.subscribe((ev) => …); // every root
+```
+
+The event object is shared, so `preventDefault()` from any listener cancels the move for all.
+
+### Edge events (`atEdge`)
+
+A move that runs out of items dispatches too, with `to: null` and `atEdge: true`. "I ran out of
+rows" is domain information the engine can't act on but the widget can:
+
+```ts
+instance.subscribe(gridEl, (ev) => {
+  if (!ev.atEdge) return;
+  if (ev.direction === "down") { nextPage(); ev.preventDefault(); }
+});
+```
+
+- `cyclic` movers wrap instead, so they never reach an edge.
+- A cross-axis key is **not** an edge — it's a key that doesn't apply, and nothing is dispatched.
+- By default the key stays unclaimed (the browser still scrolls); `preventDefault()` claims it.
+- On a virtual root the *rendered* edge isn't the real one: `atEdge` fires only once the real
+  first/last item is reached.
 
 ### Custom log sink
 

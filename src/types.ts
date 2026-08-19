@@ -68,6 +68,14 @@ export interface TabspotNavigationEvent {
   readonly grid?: { from: GridCell | null; to: GridCell | null };
   /** Virtual lists: the move hit the edge of the rendered window (§ virtualization). */
   readonly atRenderedBoundary?: boolean;
+  /**
+   * The move ran out of items in `direction` — nothing moved and `to` is null.
+   * That's domain information the engine can't act on but the widget can: flip
+   * the calendar page, hand the query back, load the next slice. `cyclic`
+   * movers wrap instead, so they never reach an edge. Calling `preventDefault()`
+   * claims the key (the browser's default is suppressed).
+   */
+  readonly atEdge?: boolean;
   readonly cancelled: boolean;
   preventDefault(): void;
 }
@@ -200,6 +208,14 @@ export type SetAttributesResult =
 export interface TabspotInstance {
   rebuild(rootEl?: HTMLElement): void;
   update(next: Partial<TabspotOptions>): void;
+  /**
+   * Listen to navigation events. Unlike `options.onNavigate` — a single slot
+   * that the next `tabspot()` call overwrites — subscribers are additive, so a
+   * component can listen without stealing the app's listener. Pass a root to
+   * receive only that root's events. Returns a detach function.
+   */
+  subscribe(listener: TabspotEventListener): () => void;
+  subscribe(root: HTMLElement, listener: TabspotEventListener): () => void;
   destroy(): void;
 }
 

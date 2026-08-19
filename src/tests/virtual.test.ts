@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setTabspotAttributes, tabspot, tabspotVirtual } from "../index.ts";
-import type { TabspotInstance, VirtualAdapter } from "../index.ts";
+import type { TabspotInstance, TabspotNavigationEvent, VirtualAdapter } from "../index.ts";
 import { press } from "./fixtures/context.ts";
 
 let instance: TabspotInstance;
@@ -245,5 +245,92 @@ describe("virtualization: dataTable (rows virtualized, column preserved)", () =>
     press(cell, "ArrowDown");
     await tick();
     expect(document.activeElement?.textContent).toBe("2,1");
+  });
+});
+
+describe("virtualization: a windowed origin must not drop the move", () => {
+  const TOTAL = 100;
+
+  /** Adapter that renders `i` and evicts every row before it, like a real window. */
+  function mount(): void {
+    document.body.innerHTML = `
+      <ul id="root">
+        <li data-index="0" tabindex="0">0</li>
+        <li data-index="1" tabindex="-1">1</li>
+        <li data-index="2" tabindex="-1">2</li>
+      </ul>`;
+    const root = byId("root");
+    const adapter: VirtualAdapter = {
+      count: () => TOTAL,
+      scrollToIndex: (i) => {
+        renderRow(root, i);
+        for (const li of Array.from(root.children)) {
+          const idx = Number(li.getAttribute("data-index"));
+          if (idx < i) li.remove(); // the origin row leaves the DOM
+        }
+      },
+    };
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, adapter);
+  }
+
+  it("completes the move even when the origin row unmounted mid-scroll", async () => {
+    mount();
+    press(byId("root").querySelector('[data-index="2"]') as HTMLElement, "ArrowDown");
+    await tick();
+    // Row 2 is gone, but the keystroke still lands on 3.
+    expect(byId("root").querySelector('[data-index="2"]')).toBeNull();
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("3");
+  });
+
+  it("reports the move with a null origin instead of swallowing it", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    mount();
+    instance.subscribe((e) => events.push(e));
+    press(byId("root").querySelector('[data-index="2"]') as HTMLElement, "ArrowDown");
+    await tick();
+    const committed = events.at(-1)!;
+    expect(committed.atRenderedBoundary).toBe(true);
+    expect(committed.from).toBeNull();
+    expect((committed.to as HTMLElement).getAttribute("data-index")).toBe("3");
+  });
+});
+
+describe("virtualization: the real end of the list reports an edge", () => {
+  const TOTAL = 100;
+
+  function mount(): void {
+    document.body.innerHTML = `<ul id="root"><li data-index="98" tabindex="-1">98</li></ul>`;
+    const root = byId("root");
+    const adapter: VirtualAdapter = {
+      count: () => TOTAL,
+      scrollToIndex: (i) => renderRow(root, i),
+    };
+    instance = tabspot();
+    setTabspotAttributes({ element: root, config: { root: {}, mover: { axis: "vertical" } } });
+    detach = tabspotVirtual(root, adapter);
+  }
+
+  it("no edge while there are still real rows beyond the window", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    mount();
+    instance.subscribe((e) => events.push(e));
+    press(byId("root").querySelector('[data-index="98"]') as HTMLElement, "ArrowDown");
+    await tick();
+    expect(events.every((e) => !e.atEdge)).toBe(true);
+    expect((document.activeElement as HTMLElement).getAttribute("data-index")).toBe("99");
+  });
+
+  it("edge fires once the real last row is reached", async () => {
+    const events: TabspotNavigationEvent[] = [];
+    mount();
+    const root = byId("root");
+    root.insertAdjacentHTML("beforeend", `<li data-index="99" tabindex="-1">99</li>`);
+    instance.subscribe((e) => events.push(e));
+    press(root.querySelector('[data-index="99"]') as HTMLElement, "ArrowDown");
+    await tick();
+    expect(events.at(-1)?.atEdge).toBe(true);
+    expect(events.at(-1)?.to).toBeNull();
   });
 });
