@@ -1,5 +1,61 @@
 # tabspot
 
+## 0.6.0
+
+### Minor Changes
+
+- [#19](https://github.com/JLAcostaEC/tabspot/pull/19) [`e462ea7`](https://github.com/JLAcostaEC/tabspot/commit/e462ea774dba5d969fb3563f20f75af38cf7cd1c) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - feat: additive navigation listeners
+
+  `options.onNavigate` is a single slot, and `tabspot()` is a singleton: a component
+  that passed its own listener silently replaced the app's. `subscribe` adds a
+  listener instead of replacing one, and returns a detach function:
+
+  ```ts
+  const off = instance.subscribe(listEl, (ev) => {
+    active = ev.to;
+  });
+  off();
+  ```
+
+  Pass a root as the first argument to receive only that root's events, or omit it
+  to receive every root's. `options.onNavigate` keeps working and is called first.
+  The event object is shared, so `preventDefault()` from any listener cancels the
+  move for all of them.
+
+- [#19](https://github.com/JLAcostaEC/tabspot/pull/19) [`e462ea7`](https://github.com/JLAcostaEC/tabspot/commit/e462ea774dba5d969fb3563f20f75af38cf7cd1c) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - feat: navigation events for a move that runs out of items (`atEdge`)
+
+  A move that clamped used to dispatch nothing, so widgets recomputed the geometry
+  Tabspot already knew — "am I on the last row?" — by hand. Now the move dispatches
+  with `to: null` and `atEdge: true`, carrying `from`, `fromIndex`, `direction` and
+  (on grids) `grid.from`. That's what turns "I ran out of rows" into flipping the
+  calendar page, handing the query back, or loading the next slice.
+
+  - `cyclic` movers wrap instead, so they never reach an edge.
+  - A cross-axis key is not an edge — it's a key that doesn't apply, and nothing is
+    dispatched.
+  - The key stays unclaimed by default (the browser still scrolls). Calling
+    `preventDefault()` on the edge event claims it.
+  - On a virtual root the rendered edge is not the real one: the report is deferred
+    to the virtual layer, which fires it only once the real first/last item is
+    reached.
+
+  Note for existing `onNavigate` consumers: listeners now also see events with
+  `to: null` and `atEdge` set. `to` was already nullable (root-level `escape`
+  dispatches with `to: null`), but a listener that dereferences it should check
+  `atEdge` first.
+
+### Patch Changes
+
+- [#19](https://github.com/JLAcostaEC/tabspot/pull/19) [`e462ea7`](https://github.com/JLAcostaEC/tabspot/commit/e462ea774dba5d969fb3563f20f75af38cf7cd1c) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - fix: a virtual move is no longer dropped when its origin row unmounts
+
+  `scrollAndActivate` looked up both ends of the move and bailed if either was
+  missing. In a windowed list the origin row is routinely evicted while the list
+  scrolls to the target, so the keystroke was silently lost at exactly the point
+  where the window slides — the failure behind workarounds that pad the item count.
+
+  The origin only feeds the event payload, so it is now optional: the move commits
+  whenever the destination resolves, and the event reports `from: null`.
+
 ## 0.5.0
 
 ### Minor Changes
