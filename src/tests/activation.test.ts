@@ -488,7 +488,7 @@ describe("a non-focus root takes keys only from its activation controller", () =
     expect(byId("cb").getAttribute("aria-activedescendant")).toBe("o1");
   });
 
-  it("in marked/controlled the controller is the root element itself", () => {
+  it("in marked the controller is the root element itself", () => {
     document.body.innerHTML = `
       <ul id="root">
         <li id="a">A</li>
@@ -508,6 +508,32 @@ describe("a non-focus root takes keys only from its activation controller", () =
     expect(active()).toBe("a"); // the root does drive the list
     key(byId("filter"), "ArrowDown");
     expect(active()).toBe("a"); // still parked where the root left it
+  });
+
+  it("same rule in controlled, asserted on the navigate event", () => {
+    const events: TabspotNavigationEvent[] = [];
+    document.body.innerHTML = `
+      <ul id="root">
+        <li id="a">A</li>
+        <li id="b">B</li>
+        <li><input id="filter" /></li>
+      </ul>`;
+    instance = tabspot({ onNavigate: (e) => events.push(e) });
+    setTabspotAttributes({
+      element: byId("root"),
+      config: { root: {}, mover: { axis: "vertical", items: "li", activation: "controlled" } },
+    });
+
+    // `controlled` mutates nothing, so the event stream is the only observable.
+    key(byId("filter"), "ArrowDown");
+    expect(events).toHaveLength(0); // the input owns its arrows
+
+    key(byId("root"), "ArrowDown");
+    expect(events).toHaveLength(1);
+    expect(events.at(-1)?.to).toBe(byId("a"));
+
+    key(byId("filter"), "ArrowDown");
+    expect(events).toHaveLength(1); // no move, and no event, from the input
   });
 
   it("leaves focus roots alone (their cursor already follows the target)", () => {
