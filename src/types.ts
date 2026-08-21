@@ -45,6 +45,11 @@ export interface GridCell {
 }
 
 export interface TabspotNavigationEvent {
+  /**
+   * What drove the move. `"programmatic"` marks a move the consumer asked for
+   * through `setTabspotActive` rather than a keystroke — no key produced it, so
+   * `key` is empty.
+   */
   readonly direction:
     | EnterExitDirections
     | "tab"
@@ -53,7 +58,8 @@ export interface TabspotNavigationEvent {
     | "home"
     | "end"
     | "pageup"
-    | "pagedown";
+    | "pagedown"
+    | "programmatic";
   readonly key: string;
   readonly from: HTMLElement | null;
   readonly to: HTMLElement | null;
@@ -121,7 +127,7 @@ export type ActiveMark = { class: string } | { attribute: string };
 export type Activation =
   // String shorthand for modes that need no required params.
   | "focus"
-  | "marked" // shorthand → mark with { attribute: "aria-selected" }
+  | "marked" // shorthand → mark with { attribute: "data-active" }
   | "controlled"
   | { mode: "focus"; roving?: boolean }
   | {
@@ -224,6 +230,58 @@ export interface SetAttributesArgs {
 export type SetAttributesResult =
   | { ok: true; instance: TabspotInstance | null }
   | { ok: false; reason: "invalid" | "nested-root"; message: string };
+
+/** Why `setTabspotActive` left the cursor where it was. */
+export type SetActiveFailureReason =
+  /** Called from inside a navigation listener — that would re-enter the dispatch. */
+  | "reentrant"
+  /** Tabspot isn't running, or the element is not inside a registered root. */
+  | "no-root"
+  /** The root's activation is `focus`, where the cursor IS DOM focus. */
+  | "focus-mode"
+  /** The element is inside the root but is not one of the mover's items. */
+  | "not-an-item"
+  /** The item is matched by `mover.skip`, and `nearest` found no landable one. */
+  | "skipped"
+  /** A navigation listener called `preventDefault()`. */
+  | "cancelled";
+
+export interface SetActiveOptions {
+  /**
+   * `direction` carried by the dispatched navigation event. Default
+   * `"programmatic"`. Override it when the move stands in for a keyed one — a
+   * consumer-built typeahead, say — and listeners should read it as such.
+   */
+  direction?: TabspotNavigationEvent["direction"];
+  /**
+   * When the requested item is skipped (`mover.skip`), land on the nearest
+   * landable item at its level instead of refusing: forward first (the direction
+   * a "next match" goes), then backward. Never crosses grouper levels.
+   * Default false.
+   */
+  nearest?: boolean;
+}
+
+/**
+ * Result of `setTabspotActive`. `ok` means the cursor is now on `to`; `moved`
+ * separates a real move (a navigation event was dispatched) from a call that
+ * found the cursor already there (idempotent, no event). Never throws — every
+ * refusal is a `reason` plus a message.
+ *
+ * `root` is the registered root the move landed in. Tabspot has no notion of a
+ * "current" root: the root is always derived from the element handed in (roots
+ * cannot nest, so an item belongs to exactly one). It is reported back so a page
+ * full of widgets can log or assert which one it drove, without re-deriving it.
+ */
+export type SetActiveResult =
+  | {
+      ok: true;
+      root: HTMLElement;
+      from: HTMLElement | null;
+      to: HTMLElement;
+      moved: boolean;
+    }
+  | { ok: false; reason: SetActiveFailureReason; message: string };
 
 export interface TabspotInstance {
   rebuild(rootEl?: HTMLElement): void;

@@ -2,12 +2,14 @@ import { ActivationManager } from "./activation.ts";
 import { createLogger, type Logger } from "./debug.ts";
 import {
   type BoundaryWalk,
+  commitActive,
   commitVirtual,
   emitEdge,
   handleKeydown,
   isNodeSkipped,
   keyToDirection,
   type NavigationDeps,
+  nearestLandable,
   resolveBoundaryWalk,
   virtualHandlesBoundary,
 } from "./navigation.ts";
@@ -25,6 +27,8 @@ import {
 } from "./virtual.ts";
 import type {
   EnterExitDirections,
+  SetActiveOptions,
+  SetActiveResult,
   TabspotEventListener,
   TabspotInstance,
   TabspotNavigationEvent,
@@ -51,6 +55,8 @@ export interface Engine {
   isRovingManaged(el: HTMLElement): boolean;
   /** Empty the cursor of a registered non-`focus` root. False if not applicable. */
   clearActive(el: HTMLElement): boolean;
+  /** Move the cursor of a non-`focus` root onto `el`. See `setTabspotActive`. */
+  setActive(el: HTMLElement, opts: SetActiveOptions | undefined): SetActiveResult;
   observerApi(): TabspotObserverAPI;
 }
 
@@ -159,14 +165,27 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     return compiled;
   }
 
+  /**
+   * Depth of navigation dispatch in flight. A cursor write from inside a
+   * listener would re-enter `notify` and can loop trivially, so `setActive`
+   * refuses while this is non-zero. Counted rather than a boolean because a
+   * listener may legitimately trigger a rebuild that dispatches again.
+   */
+  let dispatching = 0;
+
   // Fan a navigation event out to the `onNavigate` slot and every subscriber
   // interested in this root. The event object is shared, so a `preventDefault()`
   // from any of them cancels the move for all.
   function notify(ev: TabspotNavigationEvent): void {
-    state.listener?.(ev);
-    // Copy: a subscriber may detach itself while being notified.
-    for (const sub of Array.from(state.subscribers)) {
-      if (sub.root === null || sub.root === ev.root) sub.fn(ev);
+    dispatching++;
+    try {
+      state.listener?.(ev);
+      // Copy: a subscriber may detach itself while being notified.
+      for (const sub of Array.from(state.subscribers)) {
+        if (sub.root === null || sub.root === ev.root) sub.fn(ev);
+      }
+    } finally {
+      dispatching--;
     }
   }
 
@@ -403,6 +422,90 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       logger.full("active cleared", { el });
       return true;
     },
+    setActive(el, opts) {
+      const refuse = (
+        reason: Extract<SetActiveResult, { ok: false }>["reason"],
+        message: string,
+      ): SetActiveResult => {
+        logger.full("setActive refused", { el, reason, message });
+        return { ok: false, reason, message };
+      };
+
+      // Refuse rather than defer: a queued cursor write would land after the
+      // consumer's render, which is harder to reason about than a clear no.
+      if (dispatching > 0) {
+        return refuse(
+          "reentrant",
+          "cannot move the cursor from inside a navigation listener — cancel the move " +
+            "with preventDefault() and call setTabspotActive afterwards, or express the " +
+            "rule declaratively with mover.skip",
+        );
+      }
+
+      const rootEl = engine.containingRoot(el);
+      if (!rootEl) {
+        return refuse(
+          "no-root",
+          el.isConnected
+            ? "element is not inside a registered Tabspot root"
+            : "element is not in the document",
+        );
+      }
+      // Same lazy rebuild as the keydown path: the caller may hold an element
+      // from before a re-render.
+      let compiled = state.roots.get(rootEl);
+      if (!compiled || compiled.dirty) {
+        const next = compileRoot(rootEl);
+        if (!next) return refuse("no-root", "the root is no longer a valid Tabspot root");
+        state.roots.set(rootEl, next);
+        compiled = next;
+      }
+      if (compiled.activation.mode === "focus") {
+        return refuse(
+          "focus-mode",
+          "the cursor of a `focus` root IS DOM focus — call el.focus() instead, and the " +
+            "engine will migrate the roving tab stop",
+        );
+      }
+
+      const requested = compiled.byElement.get(el);
+      if (!requested) {
+        return refuse(
+          "not-an-item",
+          "element is inside the root but is not one of the mover's items",
+        );
+      }
+      const to = opts?.nearest ? nearestLandable(requested, compiled) : requested;
+      if (!to) {
+        return refuse("skipped", "the item is skipped and its level has no landable item");
+      }
+      if (!opts?.nearest && isNodeSkipped(to)) {
+        return refuse(
+          "skipped",
+          "the item is skipped by mover.skip — pass { nearest: true } to land on the " +
+            "closest landable item at its level instead",
+        );
+      }
+
+      const active = activationManager.getActive(rootEl);
+      const fromNode = active ? (compiled.byElement.get(active) ?? null) : null;
+      const from = fromNode?.el ?? null;
+      // Already there: idempotent, and no event — the engine never dispatches a
+      // move onto the item the cursor is already on.
+      if (active === to.el) return { ok: true, root: rootEl, from, to: to.el, moved: false };
+
+      const applied = commitActive(
+        makeDeps(rootEl, compiled),
+        fromNode,
+        to,
+        opts?.direction ?? "programmatic",
+      );
+      if (!applied) {
+        return refuse("cancelled", "a navigation listener cancelled the move");
+      }
+      logger.basic("active set", { rootEl, from, to: to.el });
+      return { ok: true, root: rootEl, from, to: to.el, moved: true };
+    },
     observerApi: () => state.reactor.api(),
   };
 
@@ -555,6 +658,37 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
  */
 export function clearTabspotActive(root: HTMLElement): boolean {
   return getEngine()?.clearActive(root) ?? false;
+}
+
+/**
+ * Move the cursor of a non-`focus` root onto `el`, as if the user had navigated
+ * there: the navigation event is dispatched with `direction: "programmatic"`,
+ * and a listener can still cancel it with `preventDefault()`.
+ *
+ * The counterpart to `clearTabspotActive`. It exists because the cursor of an
+ * `activedescendant` / `marked` / `controlled` root has no native setter —
+ * unlike a `focus` root, where the cursor IS DOM focus and `el.focus()` already
+ * does the job (the engine notices and migrates the roving tab stop).
+ *
+ * This is what completes a combobox: the consumer filters its own list, then
+ * says where the cursor goes. Tabspot never reads or writes the controller's
+ * value — the data model stays the consumer's.
+ *
+ * Never throws; every refusal is a `reason` plus a message. Notably it refuses
+ * when called from inside a navigation listener, which would re-enter the
+ * dispatch and can loop: to redirect a move, cancel it with `preventDefault()`
+ * and call this afterwards, or declare the rule with `mover.skip`.
+ */
+export function setTabspotActive(el: HTMLElement, opts?: SetActiveOptions): SetActiveResult {
+  const engine = getEngine();
+  if (!engine) {
+    return {
+      ok: false,
+      reason: "no-root",
+      message: "Tabspot is not running — call tabspot() first",
+    };
+  }
+  return engine.setActive(el, opts);
 }
 
 export function tabspotObserver(instance: TabspotInstance): TabspotObserverAPI {

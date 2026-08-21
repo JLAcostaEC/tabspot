@@ -6,7 +6,7 @@
  * - `activedescendant`: set `aria-activedescendant` on the controller to the
  *   active item's id (generating an id if missing); focus stays on the controller.
  *   Optionally also marks the active item (`mark`).
- * - `marked`: toggle a class/attribute (`mark`, default `{ attribute: "aria-selected" }`)
+ * - `marked`: toggle a class/attribute (`mark`, default `{ attribute: "data-active" }`)
  *   on the active item, clearing it from the previous one.
  * - `controlled`: no DOM mutation; only tracks the active item for navigation.
  */

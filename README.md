@@ -249,6 +249,110 @@ Call `clearTabspotActive(root)` to go back to an empty cursor without unregister
 the root — e.g. when the popup closes or the query changes and no suggestion should
 read as chosen. It clears the mark and the controller's `aria-activedescendant`.
 
+### Setting the cursor — `setTabspotActive`
+
+The counterpart: move the cursor onto an item programmatically, as if the user had
+navigated there. The navigation event is dispatched (`direction: "programmatic"`) and a
+listener can still cancel it with `preventDefault()`.
+
+```ts
+const res = setTabspotActive(optionEl);
+if (res.ok) {
+  // res.root / res.from / res.to; res.moved is false when the cursor was already there
+} else {
+  console.warn(res.reason, res.message);
+}
+```
+
+#### Which widget does it apply to?
+
+**The one the item belongs to.** You pass an *item*, not a root, and Tabspot derives the root
+from it — roots cannot nest, so an item belongs to exactly one. There is no ambient "current
+root" anywhere in the library: like `clearTabspotActive(root)` and `tabspotVirtual(el, adapter)`,
+every operation is addressed by element.
+
+```ts
+// Wrong: the first `.option` on the page, which may belong to any widget.
+const best = document.querySelector<HTMLElement>(".option");
+
+// Right: scoped to this widget's list, so the root resolves to this widget.
+const best = listEl.querySelector<HTMLElement>(".option");
+```
+
+`res.root` reports the root it landed in, so you can assert or log which widget you drove
+without re-deriving it. Each root keeps its own cursor: moving one never disturbs another, and
+`instance.subscribe(rootEl, fn)` hears only that root's moves.
+
+An item whose root was never registered is refused with `"no-root"` — never silently routed to a
+neighbouring widget.
+
+
+This exists because the cursor of an `activedescendant` / `marked` / `controlled` root has
+**no native setter**. In a `focus` root the cursor *is* DOM focus, so `el.focus()` already
+does it (Tabspot notices and migrates the roving tab stop) — which is why `setTabspotActive`
+refuses there, with `reason: "focus-mode"`.
+
+| `reason` | Meaning |
+| --- | --- |
+| `"reentrant"` | Called from inside a navigation listener — see below |
+| `"no-root"` | Tabspot isn't running, or the element isn't inside a registered root (covers a detached element) |
+| `"focus-mode"` | The root's activation is `focus`; use `el.focus()` |
+| `"not-an-item"` | Inside the root, but not matched by `items` |
+| `"skipped"` | Matched by `mover.skip`, and `nearest` found nothing landable |
+| `"cancelled"` | A listener called `preventDefault()` |
+
+Options:
+
+- `direction` — the `direction` the event reports. Default `"programmatic"`. Override it when
+  the move stands in for a keyed one (a consumer-built typeahead) and listeners should read it
+  as such.
+- `nearest` — when the requested item is skipped, land on the nearest landable item **at its
+  level** instead of refusing: forward first (the direction a "next match" goes), then
+  backward. Never crosses grouper levels.
+
+#### It completes a combobox
+
+Tabspot owns navigation; your app owns the data. Filtering is yours — it's async, it's your
+query, often it's a network call.
+
+```ts
+// One instance of this per combobox on the page. Nothing is global: `listEl` is
+// what scopes every call below to this widget.
+function wireCombobox(input: HTMLInputElement, listEl: HTMLElement) {
+  setTabspotAttributes({
+    element: listEl,
+    config: {
+      root: {},
+      mover: {
+        axis: "vertical",
+        items: ".option",
+        skip: "[aria-disabled='true']",
+        activation: { mode: "activedescendant", controller: `#${input.id}` },
+      },
+    },
+  });
+
+  input.addEventListener("input", async () => {
+    const rows = await search(input.value);      // your filtering, your state
+    render(listEl, rows);                        // your rendering
+    const best = listEl.querySelector<HTMLElement>(".option");  // scoped to THIS list
+    if (best) setTabspotActive(best, { nearest: true });         // Tabspot's part
+    else clearTabspotActive(listEl);             // no results: empty the cursor
+  });
+}
+```
+
+#### Do not call it from inside a navigation listener
+
+A cursor write during a dispatch re-enters the dispatch, and loops trivially. Tabspot refuses
+with `reason: "reentrant"` rather than queueing, because a deferred write would land after
+your render. To **redirect** a move:
+
+- If the rule is static ("never land on disabled rows"), declare it with
+  [`skip`](#skip--rows-that-hold-a-place-but-never-take-the-cursor).
+- Otherwise cancel the move with `preventDefault()` and call `setTabspotActive` afterwards
+  (in a microtask, effect, or event handler of your own).
+
 ## Virtualization
 
 Tabspot navigates the DOM, not your data model. For windowed lists/grids, expose the real index declaratively and the scroll imperatively:
@@ -285,6 +389,7 @@ const detach = tabspotVirtual(listEl, {
 | `unsetTabspotSection(el, section)` | Remove one section (merge can't clear a section). |
 | `getTabspotAttributes(config)` | Pure helper — returns `{ "data-tabspot": "…" }` for SSR. |
 | `clearTabspotActive(el)` | Empty a non-`focus` root's cursor (clears the mark + `aria-activedescendant`). |
+| `setTabspotActive(el, opts?)` | Move a non-`focus` root's cursor onto `el`. Returns a `SetActiveResult`. |
 
 ### `setTabspotAttributes` result
 
@@ -310,13 +415,14 @@ instance.destroy();       // stop the engine; restore managed tabindex; leave da
 
 ### `onNavigate`
 
-Fires for every move (arrow / home / end / pageup / pagedown / escape). Call `event.preventDefault()` to cancel — Tabspot swallows the key but does **not** move/activate.
+Fires for every move (arrow / home / end / pageup / pagedown / escape, plus `programmatic` for `setTabspotActive`). Call `event.preventDefault()` to cancel — Tabspot swallows the key but does **not** move/activate.
 
 ```ts
 tabspot({
   onNavigate(ev) {
     // ev: { direction, key, from, to, root, level, fromIndex?, toIndex?, grid?,
     //       atRenderedBoundary?, atEdge? }
+    // `direction: "programmatic"` and an empty `key` mark a setTabspotActive move.
     if (ev.direction === "escape") ev.preventDefault();
   },
 });

@@ -124,6 +124,31 @@ function isLandable(
   return !threshold || meetsVisibility(candidate.el, threshold);
 }
 
+/**
+ * Nearest item a move may rest on, starting at `node`: `node` itself when it is
+ * landable, else the closest landable sibling AT ITS LEVEL — forward first (the
+ * direction a "next match" would go), then backward. Never crosses a grouper
+ * level: a programmatic move should not silently change depth.
+ *
+ * Backs `setTabspotActive`'s `nearest` option, for the consumer whose best match
+ * turns out to be a disabled row.
+ */
+export function nearestLandable(node: FocusableNode, compiled: CompiledRoot): FocusableNode | null {
+  const mover = effectiveMover(node);
+  const threshold = mover?.visibilityAware;
+  if (isLandable(node, mover, threshold)) return node;
+  const sibs = getLevelFocusables(compiled, levelContainer(node));
+  const at = sibs.indexOf(node);
+  if (at === -1) return null;
+  for (let i = at + 1; i < sibs.length; i++) {
+    if (isLandable(sibs[i]!, mover, threshold)) return sibs[i]!;
+  }
+  for (let i = at - 1; i >= 0; i--) {
+    if (isLandable(sibs[i]!, mover, threshold)) return sibs[i]!;
+  }
+  return null;
+}
+
 function levelContainer(node: FocusableNode): ContainerNode {
   let cur: ContainerNode | null = node.parent;
   while (cur) {
@@ -951,19 +976,20 @@ export function resolveBoundaryWalk(
 }
 
 /**
- * Commit a move that landed after a virtual scroll (no raw key event). Dispatches
- * the navigation event (flagged `atRenderedBoundary`) and applies the effect.
+ * Dispatch a move with no raw key event behind it and apply it unless a listener
+ * cancels. Returns whether it was applied.
  *
- * `from` may be null: the origin row can unmount while the list scrolls, and it
- * only feeds the event payload — dropping the whole move because of it loses a
- * keystroke the user did make.
+ * `from` may be null: either the cursor was empty, or the origin row unmounted
+ * while a virtual list scrolled. It only feeds the event payload, so a missing
+ * one must not drop the move.
  */
-export function commitVirtual(
+function commitKeyless(
   deps: NavigationDeps,
   from: FocusableNode | null,
   to: FocusableNode,
-  direction: EnterExitDirections,
-): void {
+  direction: NavDirection,
+  extra: Pick<NavExtra, "atRenderedBoundary">,
+): boolean {
   const ev = dispatchNavigation(
     deps.listener,
     direction,
@@ -972,7 +998,37 @@ export function commitVirtual(
     to.el,
     deps.compiled.root.el,
     to.level,
-    { ...navExtra(deps.compiled, from, to), atRenderedBoundary: true },
+    { ...navExtra(deps.compiled, from, to), ...extra },
   );
-  if (!ev.cancelled) deps.applyMove(from, to);
+  if (ev.cancelled) return false;
+  deps.applyMove(from, to);
+  return true;
+}
+
+/**
+ * Commit a move that landed after a virtual scroll. Flagged
+ * `atRenderedBoundary`, because the move crossed the edge of the rendered
+ * window — see `walkVirtual`.
+ */
+export function commitVirtual(
+  deps: NavigationDeps,
+  from: FocusableNode | null,
+  to: FocusableNode,
+  direction: EnterExitDirections,
+): void {
+  commitKeyless(deps, from, to, direction, { atRenderedBoundary: true });
+}
+
+/**
+ * Commit a cursor move the consumer asked for (`setTabspotActive`). No rendered
+ * boundary is involved — no key produced this at all — so the caller needs to
+ * know whether a listener cancelled it: returns false when it did.
+ */
+export function commitActive(
+  deps: NavigationDeps,
+  from: FocusableNode | null,
+  to: FocusableNode,
+  direction: NavDirection,
+): boolean {
+  return commitKeyless(deps, from, to, direction, {});
 }

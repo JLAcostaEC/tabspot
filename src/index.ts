@@ -1,4 +1,4 @@
-export { clearTabspotActive, tabspot, tabspotObserver } from "./core.ts";
+export { clearTabspotActive, setTabspotActive, tabspot, tabspotObserver } from "./core.ts";
 export {
   getTabspotAttributes,
   setTabspotAttributes,
@@ -22,6 +22,9 @@ export type {
   MoverAxis,
   MoverLayout,
   RtlMode,
+  SetActiveFailureReason,
+  SetActiveOptions,
+  SetActiveResult,
   SetAttributesArgs,
   SetAttributesResult,
   TabspotEventListener,
