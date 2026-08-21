@@ -1,6 +1,6 @@
 {
   "name": "tabspot",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Keyboard navigation engine for hierarchical interfaces",
   "keywords": [
     "a11y",
