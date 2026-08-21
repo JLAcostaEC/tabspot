@@ -1,5 +1,14 @@
 # tabspot
 
+## 0.7.0
+
+### Minor Changes
+
+- [`0554fba`](https://github.com/JLAcostaEC/tabspot/commit/0554fba57001da8cc1928e00300ef5e3d9827a4a) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - feat: `mover.skip` items that hold a place in the index space but never take the cursor
+
+  fix: a virtual boundary no longer drops the move **and** the edge when the adjacent index is not
+  an item
+
 ## 0.6.0
 
 ### Minor Changes
