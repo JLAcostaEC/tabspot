@@ -1,23 +1,26 @@
 import { ActivationManager } from "./activation.ts";
 import { createLogger, type Logger } from "./debug.ts";
 import {
+  type BoundaryWalk,
   commitVirtual,
   emitEdge,
   handleKeydown,
+  isNodeSkipped,
   keyToDirection,
   type NavigationDeps,
-  resolveBoundaryTarget,
+  resolveBoundaryWalk,
   virtualHandlesBoundary,
 } from "./navigation.ts";
 import { DomReactor } from "./observer.ts";
 import { readTabspotConfig, TABSPOT_ATTR } from "./parser.ts";
 import { RovingManager } from "./roving.ts";
-import { buildRootTree, type CompiledRoot } from "./tree.ts";
+import { buildRootTree, type CompiledRoot, type FocusableNode } from "./tree.ts";
 import {
   findVirtualTarget,
   getVirtualAdapter,
   totalCount,
   type VirtualTarget,
+  virtualTargetIndex,
   waitForRendered,
 } from "./virtual.ts";
 import type {
@@ -50,6 +53,15 @@ export interface Engine {
   clearActive(el: HTMLElement): boolean;
   observerApi(): TabspotObserverAPI;
 }
+
+/**
+ * Hops one virtual boundary crossing may take before it gives up and reports an
+ * edge. Every hop is a scroll + render round trip (up to a 1s timeout each), so
+ * an unbounded walk over a long run of non-landable rows would hang the widget
+ * on a single keystroke. Runs this long are pathological: a `total` overshooting
+ * the real data, or a list that is unlandable end to end.
+ */
+const MAX_BOUNDARY_HOPS = 32;
 
 /** An additive navigation subscriber; `root` null means "every root". */
 interface Subscriber {
@@ -113,10 +125,15 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       if (compiled.roving) {
         const focused =
           document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        // Skipped items stay managed (so `Tab` passes them by) but can never
+        // hold the tab stop.
+        const skipped = new Set<HTMLElement>();
+        for (const f of compiled.focusables) if (isNodeSkipped(f)) skipped.add(f.el);
         rovingManager.apply(
           rootEl,
           compiled.focusables.map((f) => f.el),
           focused,
+          skipped,
         );
       } else {
         rovingManager.unregister(rootEl);
@@ -181,11 +198,17 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     return null;
   }
 
-  // Latest virtual target requested per root (coalesces held-down arrows).
+  // Token of the walk that currently owns each root's virtual boundary crossing
+  // (coalesces held-down arrows). It identifies the WALK, not the target index:
+  // a walk takes several hops and each hop changes the target, so keying on the
+  // index would make a multi-hop walk mistake its own next hop for a newer
+  // request and cancel itself.
   const pendingVirtual = new Map<HTMLElement, number>();
+  let lastWalkToken = 0;
 
   // A move clamped at the rendered edge of a virtual root: if there's a real
-  // index beyond, scroll there, wait for it to render, then activate it.
+  // index beyond, walk to the first landable row there (scrolling and waiting
+  // for each hop to render) and activate it — or report the edge.
   function tryVirtual(rootEl: HTMLElement, compiled: CompiledRoot, ev: KeyboardEvent): void {
     const adapter = getVirtualAdapter(rootEl);
     if (!adapter) return;
@@ -195,12 +218,13 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
     const current = deps.resolveCurrent(target);
     if (!current) return;
     const total = totalCount(rootEl, adapter);
-    // resolveBoundaryTarget clamps/wraps against `total`: out-of-range non-cyclic
-    // edges return null; cyclic edges wrap to the opposite real end.
-    const vt = resolveBoundaryTarget(current, compiled, ev.key, total);
+    // resolveBoundaryWalk clamps/wraps against `total`: out-of-range non-cyclic
+    // edges return null; cyclic edges wrap to the opposite real end. It hands
+    // back a WALK, because the row one index over may not be landable.
+    const walk = resolveBoundaryWalk(current, compiled, ev.key, total);
     const dir = keyToDirection(ev.key);
-    if (!vt) {
-      // `resolveBoundaryTarget` returns null for several reasons, and only one
+    if (!walk) {
+      // `resolveBoundaryWalk` returns null for several reasons, and only one
       // of them is an edge: the real first/last item. Gate on the very predicate
       // navigation used to defer to us, so a cross-axis key reports nothing and
       // a boundary navigation already reported is not reported twice.
@@ -209,44 +233,113 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       }
       return;
     }
-    const idx = vt.kind === "linear" ? vt.index : vt.row;
     if (!dir) return;
     ev.preventDefault();
-    pendingVirtual.set(rootEl, idx);
-    void scrollAndActivate(rootEl, vt, current.el, dir);
+    const token = ++lastWalkToken;
+    pendingVirtual.set(rootEl, token);
+    void walkVirtual(rootEl, walk, current, dir, token);
   }
 
-  async function scrollAndActivate(
+  /**
+   * Walk a virtualized boundary crossing to the first row a move may rest on.
+   *
+   * Every hop is a full round trip — scroll, wait for the row to render, rebuild
+   * — because the next index can be outside the rendered window too. A hop that
+   * resolves onto a row the item list does not accept (excluded by `items`) or
+   * that the mover `skip`s continues in the same direction, so the cursor never
+   * rests on one, not even transiently.
+   *
+   * The walk always ENDS IN AN EVENT: it commits the move, or reports `atEdge`
+   * once nothing landable is left. Ending silently is the bug this replaces —
+   * `tryVirtual` already claimed the keystroke with `preventDefault`, so a quiet
+   * return strands the cursor with no event to react to and no native scroll
+   * either. The one exception is being superseded by a newer keystroke, which
+   * reports on its own behalf.
+   */
+  async function walkVirtual(
     rootEl: HTMLElement,
-    vt: VirtualTarget,
-    fromEl: HTMLElement,
+    walk: BoundaryWalk,
+    origin: FocusableNode,
     dir: EnterExitDirections,
+    token: number,
   ): Promise<void> {
     const adapter = getVirtualAdapter(rootEl);
     if (!adapter) return;
-    const idx = vt.kind === "linear" ? vt.index : vt.row;
-    try {
-      await adapter.scrollToIndex(idx);
-    } catch {
-      return;
-    }
-    if (pendingVirtual.get(rootEl) !== idx) return; // superseded
-    // Bind `tick` to correctly handle any `this` inside the adapter implementation
-    const rendered = await waitForRendered(rootEl, idx, 1000, adapter.tick?.bind(adapter));
-    if (!rendered || pendingVirtual.get(rootEl) !== idx) return;
-    pendingVirtual.delete(rootEl);
+    let vt: VirtualTarget | null = walk.target;
+    let hop = 0;
 
-    const compiled = compileRoot(rootEl);
+    // Each hop must finish before the next begins: where to look next is only
+    // known once this row has rendered. Sequential by nature, not parallelisable.
+    /* oxlint-disable no-await-in-loop */
+    for (; hop < MAX_BOUNDARY_HOPS; hop++) {
+      if (!vt) break; // the index left the range: the real edge
+      const idx = virtualTargetIndex(vt);
+      // A cyclic walk that arrives back where it started has been all the way
+      // around without finding a landable row. A circular index space never
+      // leaves the range, so this is the only thing that ends it.
+      if (idx === walk.origin) break;
+
+      try {
+        await adapter.scrollToIndex(idx);
+      } catch {
+        break;
+      }
+      if (pendingVirtual.get(rootEl) !== token) return; // superseded by a newer key
+      // Bind `tick` to correctly handle any `this` inside the adapter implementation
+      const rendered = await waitForRendered(rootEl, idx, 1000, adapter.tick?.bind(adapter));
+      if (pendingVirtual.get(rootEl) !== token) return;
+      // The adapter cannot produce this row — a `total` overshooting the real
+      // data (a stale `aria-setsize`), or a window that will not move. Insisting
+      // costs a full timeout per hop for rows that will never arrive, so an
+      // unrenderable row is the end of the list.
+      if (!rendered) break;
+
+      const compiled = compileRoot(rootEl);
+      if (!compiled) return;
+      state.roots.set(rootEl, compiled);
+      const targetEl = findVirtualTarget(rootEl, vt);
+      const to = targetEl ? compiled.byElement.get(targetEl) : undefined;
+      if (to && !isNodeSkipped(to)) {
+        pendingVirtual.delete(rootEl);
+        // The origin row may have unmounted while the list scrolled; it only
+        // feeds the event payload, so a missing one must not drop the move.
+        const from = compiled.byElement.get(origin.el) ?? null;
+        commitVirtual(makeDeps(rootEl, compiled), from, to, dir);
+        return;
+      }
+      vt = walk.step(vt); // not landable — keep going in the same direction
+    }
+    /* oxlint-enable no-await-in-loop */
+
+    if (pendingVirtual.get(rootEl) !== token) return;
+    pendingVirtual.delete(rootEl);
+    if (hop >= MAX_BOUNDARY_HOPS) {
+      logger.warn(
+        `virtual boundary walk gave up after ${MAX_BOUNDARY_HOPS} hops without a landable ` +
+          "row; reporting an edge. Check that `total` matches the data and that the run of " +
+          "non-item / skipped rows is intentional",
+        { rootEl, from: origin.el, direction: dir },
+      );
+    }
+    reportVirtualEdge(rootEl, origin, dir);
+  }
+
+  /**
+   * Report the edge a virtual walk ended on. Reads the freshest tree so the
+   * event carries a correct `fromIndex`, falling back to the pre-walk node when
+   * the origin row unmounted while the list scrolled — an edge the consumer
+   * never hears is exactly what stranded the cursor before.
+   */
+  function reportVirtualEdge(
+    rootEl: HTMLElement,
+    origin: FocusableNode,
+    dir: EnterExitDirections,
+  ): void {
+    const compiled = state.roots.get(rootEl);
     if (!compiled) return;
-    state.roots.set(rootEl, compiled);
-    const targetEl = findVirtualTarget(rootEl, vt);
-    if (!targetEl) return;
-    const to = compiled.byElement.get(targetEl);
-    if (!to) return;
-    // The origin row may have unmounted while the list scrolled; it only feeds
-    // the event payload, so a missing one must not drop the move.
-    const from = compiled.byElement.get(fromEl) ?? null;
-    commitVirtual(makeDeps(rootEl, compiled), from, to, dir);
+    const from = compiled.byElement.get(origin.el) ?? origin;
+    // No raw key: the walk outlived the keystroke, same as `commitVirtual`.
+    emitEdge(makeDeps(rootEl, compiled), from, dir, "");
   }
 
   const state: EngineState = {

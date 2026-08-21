@@ -30,6 +30,11 @@ export type VirtualTarget =
   | { kind: "linear"; index: number }
   | { kind: "grid"; row: number; col: number };
 
+/** The real (row) index a virtual target points at. */
+export function virtualTargetIndex(target: VirtualTarget): number {
+  return target.kind === "linear" ? target.index : target.row;
+}
+
 const adapters = new WeakMap<HTMLElement, VirtualAdapter>();
 
 /** Register a virtualization adapter for a root element. Returns a detach fn. */

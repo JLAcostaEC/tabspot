@@ -64,6 +64,20 @@ describe("parser", () => {
     expect(parseTabspotAttribute('{"mover":{"cyclic":"true"}}')).toBeNull();
   });
 
+  it("accepts skip on linear and grid movers", () => {
+    expect(
+      parseTabspotAttribute('{"mover":{"axis":"vertical","items":".option","skip":".sep"}}'),
+    ).toEqual({ mover: { axis: "vertical", items: ".option", skip: ".sep" } });
+    expect(
+      parseTabspotAttribute('{"mover":{"layout":"grid","items":"td","skip":"[aria-disabled]"}}'),
+    ).toEqual({ mover: { layout: "grid", items: "td", skip: "[aria-disabled]" } });
+  });
+
+  it("rejects an empty or non-string skip", () => {
+    expect(parseTabspotAttribute('{"mover":{"axis":"vertical","skip":""}}')).toBeNull();
+    expect(parseTabspotAttribute('{"mover":{"axis":"vertical","skip":true}}')).toBeNull();
+  });
+
   it("returns null for empty string", () => {
     expect(parseTabspotAttribute("")).toBeNull();
     expect(parseTabspotAttribute(null)).toBeNull();

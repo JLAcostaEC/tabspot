@@ -13,6 +13,8 @@
 
 interface RovingState {
   items: Set<HTMLElement>;
+  /** Managed items the tab stop must never rest on (the mover's `skip`). */
+  skipped: Set<HTMLElement>;
   tabStop: HTMLElement | null;
 }
 
@@ -45,30 +47,41 @@ export class RovingManager {
   /**
    * (Re)apply roving over `items` for `root`. The tab stop is, in order of
    * preference: `preferred` (if a managed item), the previous tab stop (if still
-   * present), else the first item.
+   * present), else the first item — each only if not `skipped`.
+   *
+   * A skipped item stays MANAGED rather than being left out: that way it carries
+   * `tabindex="-1"` and `Tab` passes it by, instead of keeping whatever tabindex
+   * the author left on it and possibly becoming a stop of its own.
    */
-  apply(root: HTMLElement, items: HTMLElement[], preferred: HTMLElement | null): void {
+  apply(
+    root: HTMLElement,
+    items: HTMLElement[],
+    preferred: HTMLElement | null,
+    skipped: ReadonlySet<HTMLElement> = new Set(),
+  ): void {
     const prev = this.roots.get(root);
     if (prev) for (const el of prev.items) this.managed.delete(el);
 
     const set = new Set(items);
+    const canStop = (el: HTMLElement | null | undefined): boolean =>
+      el != null && set.has(el) && !skipped.has(el);
     let stop: HTMLElement | null = null;
-    if (preferred && set.has(preferred)) stop = preferred;
-    else if (prev?.tabStop && set.has(prev.tabStop)) stop = prev.tabStop;
-    else stop = items[0] ?? null;
+    if (canStop(preferred)) stop = preferred;
+    else if (canStop(prev?.tabStop)) stop = prev?.tabStop ?? null;
+    else stop = items.find((el) => !skipped.has(el)) ?? null;
 
     for (const el of items) {
       this.snapshot(el);
       this.managed.add(el);
       this.setTab(el, el === stop ? "0" : "-1");
     }
-    this.roots.set(root, { items: set, tabStop: stop });
+    this.roots.set(root, { items: set, skipped: new Set(skipped), tabStop: stop });
   }
 
-  /** Migrate the tab stop of `root` to `to` (a managed item). No-op otherwise. */
+  /** Migrate the tab stop of `root` to `to` (a managed, non-skipped item). No-op otherwise. */
   migrate(root: HTMLElement, to: HTMLElement): void {
     const st = this.roots.get(root);
-    if (!st || !st.items.has(to) || st.tabStop === to) return;
+    if (!st || !st.items.has(to) || st.skipped.has(to) || st.tabStop === to) return;
     if (st.tabStop && st.items.has(st.tabStop)) this.setTab(st.tabStop, "-1");
     this.setTab(to, "0");
     st.tabStop = to;

@@ -39,6 +39,7 @@ const LINEAR_MOVER_KEYS = new Set([
   "ignoreKeys",
   "visibilityAware",
   "items",
+  "skip",
   "activation",
 ]);
 const GRID_MOVER_KEYS = new Set([
@@ -50,6 +51,7 @@ const GRID_MOVER_KEYS = new Set([
   "ignoreKeys",
   "visibilityAware",
   "items",
+  "skip",
   "activation",
 ]);
 const GROUPER_KEYS = new Set(["enterDirection", "exitDirection", "enterExitOnLast"]);
@@ -245,6 +247,7 @@ function validateMover(raw: Record<string, unknown>): TabspotMoverOptions {
     ignoreKeys?: readonly ManagedKey[];
     visibilityAware?: Visibility;
     items?: string;
+    skip?: string;
     activation?: Activation;
   } = {};
   if ("cyclic" in raw) base.cyclic = bool(raw.cyclic, "cyclic");
@@ -252,6 +255,7 @@ function validateMover(raw: Record<string, unknown>): TabspotMoverOptions {
   if ("visibilityAware" in raw)
     base.visibilityAware = oneOf(raw.visibilityAware, VISIBILITIES, "visibilityAware");
   if ("items" in raw) base.items = nonEmptyString(raw.items, "items");
+  if ("skip" in raw) base.skip = nonEmptyString(raw.skip, "skip");
   if ("activation" in raw) base.activation = validateActivation(raw.activation);
 
   if (layout === "grid") {

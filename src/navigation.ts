@@ -1,4 +1,4 @@
-import { meetsVisibility } from "./focusable.ts";
+import { meetsVisibility, safeMatches } from "./focusable.ts";
 import type {
   CompiledRoot,
   ContainerNode,
@@ -7,7 +7,7 @@ import type {
   GrouperNode,
   NavNode,
 } from "./tree.ts";
-import { getVirtualAdapter, realIndex, type VirtualTarget } from "./virtual.ts";
+import { getVirtualAdapter, realIndex, type VirtualTarget, virtualTargetIndex } from "./virtual.ts";
 import type {
   EnterExitDirections,
   GridCell,
@@ -20,6 +20,7 @@ import type {
   TabspotMoverOptions,
   TabspotNavigationEvent,
   TabspotRootOptions,
+  Visibility,
 } from "./types.ts";
 
 type NavDirection = TabspotNavigationEvent["direction"];
@@ -90,6 +91,37 @@ function effectiveMover(node: FocusableNode): TabspotMoverOptions | undefined {
   if (cur.kind === "mover") return cur.opts;
   // grouper / root both expose `.mover`.
   return cur.mover;
+}
+
+/**
+ * Whether `el` is a SKIPPED item of `mover`: a full member of the item list (it
+ * holds its place in the index space, so virtual arithmetic and `data-index`
+ * stay dense) that no move may ever rest on. Evaluated per move rather than at
+ * build time, so toggling the attribute the selector tests takes effect on the
+ * next keystroke.
+ */
+function isSkipped(el: HTMLElement, mover: TabspotMoverOptions | undefined): boolean {
+  const sel = mover?.skip;
+  return sel !== undefined && safeMatches(el, sel);
+}
+
+/**
+ * Whether `node` is skipped under its own governing mover. Exported for the
+ * engine: the roving tab stop and the virtualized boundary walk both have to
+ * refuse a skipped item, and neither has the mover at hand.
+ */
+export function isNodeSkipped(node: FocusableNode): boolean {
+  return isSkipped(node.el, effectiveMover(node));
+}
+
+/** Whether a move may rest on `candidate` (not skipped, and visible enough). */
+function isLandable(
+  candidate: FocusableNode,
+  mover: TabspotMoverOptions | undefined,
+  threshold: Visibility | undefined,
+): boolean {
+  if (isSkipped(candidate.el, mover)) return false;
+  return !threshold || meetsVisibility(candidate.el, threshold);
 }
 
 function levelContainer(node: FocusableNode): ContainerNode {
@@ -266,26 +298,30 @@ function getGridLayout(
   return cached;
 }
 
+/** First candidate a move may rest on (entry, `Home`, grouper entry). */
 function firstVisible(
   candidates: FocusableNode[],
   mover: TabspotMoverOptions | undefined,
 ): FocusableNode | null {
   const threshold = mover?.visibilityAware;
-  if (!threshold) return candidates[0] ?? null;
+  if (!threshold && mover?.skip === undefined) return candidates[0] ?? null;
   for (const c of candidates) {
-    if (meetsVisibility(c.el, threshold)) return c;
+    if (isLandable(c, mover, threshold)) return c;
   }
   return null;
 }
 
+/** Last candidate a move may rest on (entry, `End`, `enterExitOnLast`). */
 function lastVisible(
   candidates: FocusableNode[],
   mover: TabspotMoverOptions | undefined,
 ): FocusableNode | null {
   const threshold = mover?.visibilityAware;
-  if (!threshold) return candidates[candidates.length - 1] ?? null;
+  if (!threshold && mover?.skip === undefined) {
+    return candidates[candidates.length - 1] ?? null;
+  }
   for (let i = candidates.length - 1; i >= 0; i--) {
-    if (meetsVisibility(candidates[i]!.el, threshold)) return candidates[i]!;
+    if (isLandable(candidates[i]!, mover, threshold)) return candidates[i]!;
   }
   return null;
 }
@@ -613,9 +649,11 @@ function pickNextVisible(
       if (i === fromIdx) return null;
       continue;
     }
+    // Back where we started: a cyclic lap found nothing landable. There is no
+    // next item — not one more lap.
     if (i === fromIdx) return null;
     const candidate = sibs[i]!;
-    if (!threshold || meetsVisibility(candidate.el, threshold)) return candidate;
+    if (isLandable(candidate, mover, threshold)) return candidate;
     i += step;
   }
 }
@@ -714,9 +752,40 @@ function handlePage(
   const targetRow = down
     ? Math.min(at.row + pageSize, column.length - 1)
     : Math.max(at.row - pageSize, 0);
-  const target = column[targetRow];
+  const target = pickPageTarget(column, at.row, targetRow, mover);
   if (!target || target === focusable) return false;
   return performMove(focusable, target, down ? "pagedown" : "pageup", rawEvent, deps);
+}
+
+/**
+ * Resolve where a Page jump lands when the computed row is skipped: continue
+ * along the jump first (a run of skipped rows must not shorten it), then fall
+ * back toward the origin (so the jump still moves instead of dying on a skipped
+ * row at the edge). Returns null when nothing between the origin and either end
+ * is landable.
+ */
+function pickPageTarget(
+  column: FocusableNode[],
+  fromRow: number,
+  targetRow: number,
+  mover: TabspotMoverOptions | undefined,
+): FocusableNode | null {
+  if (mover?.skip === undefined) return column[targetRow] ?? null;
+  const landable = (i: number): FocusableNode | null => {
+    const node = column[i];
+    if (!node || isSkipped(node.el, mover)) return null;
+    return node;
+  };
+  const away = targetRow >= fromRow ? 1 : -1;
+  for (let i = targetRow; i >= 0 && i < column.length; i += away) {
+    const node = landable(i);
+    if (node) return node;
+  }
+  for (let i = targetRow - away; i !== fromRow; i -= away) {
+    const node = landable(i);
+    if (node) return node;
+  }
+  return null;
 }
 
 /**
@@ -812,26 +881,49 @@ function wrapIndex(index: number, total: number | null, cyclic: boolean): number
 }
 
 /**
+ * A boundary crossing at a virtualized edge, expressed as a WALK rather than a
+ * single target.
+ *
+ * The row one index beyond the current item may not be landable — outside the
+ * mover's `items`, or one of its `skip`ped ones — and then the move has to
+ * continue in the same direction instead of vanishing. Only the caller can tell:
+ * the row may not even be rendered yet. So this hands back the first candidate
+ * plus the means to keep stepping.
+ */
+export interface BoundaryWalk {
+  /** First candidate beyond the current item. */
+  target: VirtualTarget;
+  /**
+   * The current item's own real index. A cyclic walk that arrives back here has
+   * gone all the way around without finding anything landable, and a circular
+   * index space has no out-of-range index to stop it — this is the stop.
+   */
+  origin: number;
+  /** Next candidate in the same direction, or null at a non-cyclic real edge. */
+  step: (from: VirtualTarget) => VirtualTarget | null;
+}
+
+/**
  * When an in-axis move clamps at the rendered edge of a virtual list, compute
- * the real index just beyond. The engine then scrolls there and re-activates.
+ * the walk that continues it: the real index just beyond, and how to keep going.
  * With a cyclic mover and a known `total`, a move past the real first/last item
  * wraps to the opposite end. Returns null when the key isn't an in-axis/vertical
  * move, there's no real index to read, or the move runs off a non-cyclic edge.
  */
-export function resolveBoundaryTarget(
+export function resolveBoundaryWalk(
   focusable: FocusableNode,
   compiled: CompiledRoot,
   key: string,
   total: number | null,
-): VirtualTarget | null {
+): BoundaryWalk | null {
   const dir = KEY_TO_DIR[key];
   if (!dir) return null;
   const mover = effectiveMover(focusable);
   if (!mover) return null;
   const real = realIndex(focusable.el);
   if (real === null) return null;
-  const forward = isForward(dir, compiled.rtl);
   const cyclic = mover.cyclic === true;
+  const delta = isForward(dir, compiled.rtl) ? 1 : -1;
 
   if (isGridMover(mover)) {
     // Only vertical crosses rows; columns are assumed rendered.
@@ -839,13 +931,23 @@ export function resolveBoundaryTarget(
     const layout = getGridLayout(compiled, levelContainer(focusable), mover.rows);
     const at = layout.pos.get(focusable);
     if (!at) return null;
-    const row = wrapIndex(real + (forward ? 1 : -1), total, cyclic);
-    return row === null ? null : { kind: "grid", row, col: at.col };
+    const cell = (from: number): VirtualTarget | null => {
+      const row = wrapIndex(from + delta, total, cyclic);
+      return row === null ? null : { kind: "grid", row, col: at.col };
+    };
+    const target = cell(real);
+    if (!target) return null;
+    return { target, origin: real, step: (from) => cell(virtualTargetIndex(from)) };
   }
 
   if (mover.axis !== directionAxis(dir)) return null; // cross-axis is grouper territory
-  const index = wrapIndex(real + (forward ? 1 : -1), total, cyclic);
-  return index === null ? null : { kind: "linear", index };
+  const linear = (from: number): VirtualTarget | null => {
+    const index = wrapIndex(from + delta, total, cyclic);
+    return index === null ? null : { kind: "linear", index };
+  };
+  const target = linear(real);
+  if (!target) return null;
+  return { target, origin: real, step: (from) => linear(virtualTargetIndex(from)) };
 }
 
 /**

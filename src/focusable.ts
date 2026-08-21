@@ -45,6 +45,19 @@ export function isFocusable(el: Element, allowNegativeTabindex = false): el is H
 }
 
 /**
+ * `el.matches(selector)` that cannot throw: an invalid selector matches nothing
+ * instead of breaking a build or a keystroke mid-flight. Shared by every
+ * author-supplied selector (`items`, `skip`).
+ */
+export function safeMatches(el: HTMLElement, selector: string): boolean {
+  try {
+    return el.matches(selector);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Walk descendants of `root` (excluding `root` itself) in document order.
  * Yields every element, but does NOT descend into a subtree when
  * `stopAt(node)` returns true — i.e. configured wrappers and focusables

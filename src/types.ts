@@ -143,6 +143,26 @@ interface TabspotBaseMoverOptions {
   visibilityAware?: Visibility;
   /** CSS selector defining which descendants are navigable items. */
   items?: string;
+  /**
+   * CSS selector for items the cursor passes over rather than lands on —
+   * disabled options, group headers, separators.
+   *
+   * A skipped item stays a full member of the item list, so `data-index`
+   * arithmetic and virtual boundary resolution stay dense over the data. What
+   * changes is where a move may rest: a move resolving onto a skipped item
+   * continues in the same direction (in the in-DOM and the virtualized path
+   * alike), a run of consecutive skipped items is traversed in a single move,
+   * and running out of landable items reports `atEdge`. Entry, `Home`/`End` and
+   * grouper entry land on the first/last non-skipped item; under roving a
+   * skipped item is managed (so `Tab` passes it by) but never holds the tab
+   * stop. The cursor never rests on a skipped item, so
+   * `aria-activedescendant` never points at one — not even transiently.
+   *
+   * Matched on each move, so toggling the attribute or class the selector tests
+   * takes effect on the next keystroke; the roving tab stop refreshes on the
+   * next build.
+   */
+  skip?: string;
   /** How the active item is expressed. Default `"focus"`. */
   activation?: Activation;
 }

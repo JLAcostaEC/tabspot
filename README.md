@@ -108,6 +108,7 @@ interface TabspotNodeOptions {
 //   ignoreKeys?: readonly ManagedKey[]   // Tab, ArrowLeft/Right/Up/Down, Home, End, PageUp, PageDown
 //   visibilityAware?: "Invisible" | "Visible"
 //   items?: string                       // CSS selector: which descendants are navigable
+//   skip?: string                        // CSS selector: items passed over, never landed on
 //   activation?: Activation              // how the active item is expressed (see below)
 
 type GridRowStrategy =
@@ -166,6 +167,36 @@ When a mover declares `items`, membership is the CSS selector (not focusable det
 </div>
 <!-- Tabspot sets one .cell to tabindex="0" and the rest to "-1". -->
 ```
+
+> `items` **replaces** focusable detection: the selector is the whole membership
+> rule, so the engine's `[disabled]` / `aria-hidden` handling no longer applies.
+> To show a row but never land on it, keep it in `items` and add `skip` — see below.
+
+## `skip` — rows that hold a place but never take the cursor
+
+`mover.skip` is a CSS selector for items the cursor **passes over rather than lands on**: disabled options, group headers, separators.
+
+```html
+<ul id="lb" role="listbox"
+    data-tabspot='{"root":{},"mover":{"axis":"vertical","items":".option",
+      "skip":"[aria-disabled=\'true\']",
+      "activation":{"mode":"activedescendant","controller":"#cb"}}}'>
+  <li class="option" data-index="0" aria-disabled="true">Unavailable</li>
+  <li class="option" data-index="1">Apple</li>
+</ul>
+```
+
+A skipped item stays a **full member of the item list** — that's the point. Excluding such rows from `items` instead leaves holes in the item list while `data-index` stays dense over the data, which breaks virtual boundary arithmetic; `skip` keeps the index space dense and changes only where a move may rest:
+
+- A move resolving onto a skipped item **continues in the same direction**, in the in-DOM and the virtualized path alike.
+- A run of consecutive skipped items is traversed in a **single move** — the cursor never rests on one, so `aria-activedescendant` never points at one, not even transiently.
+- Only skipped items left in that direction → **`atEdge`**, exactly like running out.
+- Entry, `Home`/`End` and grouper entry land on the first/last **non-skipped** item.
+- Under roving a skipped item is still managed (`tabindex="-1"`, so `Tab` passes it by) but never holds the tab stop.
+- Grid movers skip per cell: a skipped cell is stepped over within its row, and in a column walk its row is passed over.
+- Omitted, nothing changes.
+
+The selector is matched on each move, so toggling the attribute or class it tests takes effect on the next keystroke. The roving tab stop is assigned at build time and refreshes on the next rebuild (`instance.rebuild()`).
 
 ## Roving tabindex
 
@@ -236,6 +267,7 @@ const detach = tabspotVirtual(listEl, {
 
 - Each rendered item carries its real index via `data-index` (preferred) or `aria-posinset` / `aria-rowindex`; the total via `aria-setsize` / `aria-rowcount` or `adapter.count()`.
 - When an arrow clamps at the rendered edge, Tabspot calls `scrollToIndex(target)`, waits for that index to render, then activates it (with coalescing for held keys).
+- If the row at that index isn't landable — excluded by `items`, or matched by `skip` — the move **continues in the same direction**, one scroll-and-render round trip per hop, until it finds a landable row. Every crossing ends in an event: the move, or `atEdge` when nothing landable is left. It stops early (reporting `atEdge`) when a row never renders — the usual cause is a `total` that overshoots the real data — or after 32 hops, which is logged in debug.
 - By default the render wait uses a `MutationObserver` bounded by a ~1s timeout. Provide `tick` (a `() => Promise<void>` such as Vue's `nextTick` or Svelte's `tick`) and Tabspot awaits your framework's render flush instead — no timeout in the happy path. If the row still isn't rendered when `tick` resolves, it falls back to the observer.
 - For grids, rows are virtualized by `data-index` on the `<tr>` and the column is preserved via `data-colindex` on cells.
 - Use `activation: "activedescendant"` or `"controlled"` for virtual lists — `"focus"` is fragile because a focused row can unmount on scroll.
@@ -325,7 +357,11 @@ instance.subscribe(gridEl, (ev) => {
 - A cross-axis key is **not** an edge — it's a key that doesn't apply, and nothing is dispatched.
 - By default the key stays unclaimed (the browser still scrolls); `preventDefault()` claims it.
 - On a virtual root the *rendered* edge isn't the real one: `atEdge` fires only once the real
-  first/last item is reached.
+  first/last **landable** item is reached — rows excluded by `items` or matched by `skip` are
+  walked past first. A boundary crossing there always ends in an event, so a cursor is never
+  left stranded with nothing to react to.
+- Skipped items never receive the cursor, so running out of landable items in a direction is an
+  edge even when more rows exist beyond them.
 
 ### Custom log sink
 

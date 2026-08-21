@@ -1,5 +1,5 @@
 import type { ActivationMode } from "./enums.ts";
-import { isFocusable, walk } from "./focusable.ts";
+import { isFocusable, safeMatches, walk } from "./focusable.ts";
 import { readTabspotConfig } from "./parser.ts";
 import type {
   ActiveMark,
@@ -388,14 +388,7 @@ function findItemSubgroup(el: HTMLElement, ctx: BuildCtx): HTMLElement | null {
  */
 function isItem(el: HTMLElement, ctx: BuildCtx): boolean {
   const sel = ctx.defaultMover?.items;
-  if (sel) {
-    try {
-      return el.matches(sel);
-    } catch {
-      // Invalid selector — match nothing rather than throwing mid-build.
-      return false;
-    }
-  }
+  if (sel) return safeMatches(el, sel);
   return isFocusable(el, ctx.allowNeg);
 }
 
