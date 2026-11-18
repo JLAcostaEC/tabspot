@@ -1,5 +1,11 @@
 # tabspot
 
+## 0.8.1
+
+### Patch Changes
+
+- [#45](https://github.com/JLAcostaEC/tabspot/pull/45) [`7356bd3`](https://github.com/JLAcostaEC/tabspot/commit/7356bd32ec2f76307d791c6fd5a25a34e0396dd6) Thanks [@JLAcostaEC](https://github.com/JLAcostaEC)! - fix: fix arrow-key navigation after an item is removed
+
 ## 0.8.0
 
 ### Minor Changes
