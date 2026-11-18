@@ -34,6 +34,11 @@ export class DomReactor {
     this.pending.clear();
   }
 
+  flush(): void {
+    const records = this.observer.takeRecords();
+    if (records.length > 0) this.onMutations(records);
+  }
+
   api(): TabspotObserverAPI {
     return {
       observe: (registration) => this.register(registration),
@@ -70,7 +75,6 @@ export class DomReactor {
     const removedRoots = new Set<HTMLElement>();
 
     const flag = (n: Node) => {
-      if (!(n instanceof HTMLElement)) return;
       for (const root of this.engine.rootElements()) {
         if (dirtyRoots.has(root)) continue;
         if (root === n || root.contains(n)) dirtyRoots.add(root);
@@ -99,14 +103,14 @@ export class DomReactor {
         }
         flag(rec.target);
       } else if (rec.type === "childList") {
+        // Removed nodes no longer belong to their former parent.
+        flag(rec.target);
         rec.addedNodes.forEach((n) => {
-          flag(n);
-          if (n instanceof HTMLElement) addedHosts.push(n);
+          if (!(n instanceof HTMLElement)) return;
+          if (this.engine.hasRoot(n)) dirtyRoots.add(n);
+          addedHosts.push(n);
         });
-        rec.removedNodes.forEach((n) => {
-          flag(n);
-          checkRemovedRoot(n);
-        });
+        rec.removedNodes.forEach(checkRemovedRoot);
       }
     }
 

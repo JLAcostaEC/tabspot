@@ -425,6 +425,8 @@ export interface NavigationDeps {
   listener: TabspotEventListener | undefined;
   /** Resolve the current focusable from the keydown target (activation-aware). */
   resolveCurrent: (target: HTMLElement) => FocusableNode | null;
+  /** Check that the destination still belongs to the live root. */
+  canMoveTo: (to: FocusableNode) => boolean;
   /**
    * Apply a move's side effect: focus / aria marker / nothing, + track active.
    * `from` is null when the move enters the root with an empty cursor.
@@ -873,7 +875,7 @@ function performMove(
   rawEvent: KeyboardEvent,
   deps: NavigationDeps,
 ): boolean {
-  if (!to) return false;
+  if (!to || !deps.canMoveTo(to)) return false;
   const compiled = deps.compiled;
   const ev = dispatchNavigation(
     deps.listener,
@@ -889,6 +891,7 @@ function performMove(
     rawEvent.preventDefault();
     return true;
   }
+  if (!deps.canMoveTo(to)) return false;
   deps.applyMove(from, to);
   return true;
 }
@@ -975,9 +978,10 @@ export function resolveBoundaryWalk(
   return { target, origin: real, step: (from) => linear(virtualTargetIndex(from)) };
 }
 
+type KeylessMoveResult = "moved" | "cancelled" | "not-an-item";
+
 /**
- * Dispatch a move with no raw key event behind it and apply it unless a listener
- * cancels. Returns whether it was applied.
+ * Dispatch a move with no raw key event behind it and apply it if it remains valid.
  *
  * `from` may be null: either the cursor was empty, or the origin row unmounted
  * while a virtual list scrolled. It only feeds the event payload, so a missing
@@ -989,7 +993,8 @@ function commitKeyless(
   to: FocusableNode,
   direction: NavDirection,
   extra: Pick<NavExtra, "atRenderedBoundary">,
-): boolean {
+): KeylessMoveResult {
+  if (!deps.canMoveTo(to)) return "not-an-item";
   const ev = dispatchNavigation(
     deps.listener,
     direction,
@@ -1000,9 +1005,10 @@ function commitKeyless(
     to.level,
     { ...navExtra(deps.compiled, from, to), ...extra },
   );
-  if (ev.cancelled) return false;
+  if (ev.cancelled) return "cancelled";
+  if (!deps.canMoveTo(to)) return "not-an-item";
   deps.applyMove(from, to);
-  return true;
+  return "moved";
 }
 
 /**
@@ -1022,13 +1028,13 @@ export function commitVirtual(
 /**
  * Commit a cursor move the consumer asked for (`setTabspotActive`). No rendered
  * boundary is involved — no key produced this at all — so the caller needs to
- * know whether a listener cancelled it: returns false when it did.
+ * know whether the move was applied.
  */
 export function commitActive(
   deps: NavigationDeps,
   from: FocusableNode | null,
   to: FocusableNode,
   direction: NavDirection,
-): boolean {
+): KeylessMoveResult {
   return commitKeyless(deps, from, to, direction, {});
 }
