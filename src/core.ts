@@ -1,5 +1,6 @@
 import { ActivationManager } from "./activation.ts";
 import { createLogger, type Logger } from "./debug.ts";
+import { safeMatches } from "./focusable.ts";
 import {
   type BoundaryWalk,
   commitActive,
@@ -200,6 +201,18 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
         // next key enters the root instead of moving off an implied position.
         const active = activationManager.getActive(rootEl);
         return active ? (compiled.byElement.get(active) ?? null) : null;
+      },
+      canMoveTo: (to) => {
+        const current = state.roots.get(rootEl)?.byElement.get(to.el);
+        const parent = current?.parent;
+        const items = parent?.kind === "mover" ? parent.opts.items : parent?.mover?.items;
+        // Classes can change in a listener without invalidating the cached tree.
+        return (
+          to.el.isConnected &&
+          rootEl.contains(to.el) &&
+          current !== undefined &&
+          (!items || safeMatches(to.el, items))
+        );
       },
       applyMove: (_from, to) => {
         if (compiled.activation.mode === "focus") to.el.focus();
@@ -442,6 +455,7 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
         );
       }
 
+      state.reactor.flush();
       const rootEl = engine.containingRoot(el);
       if (!rootEl) {
         return refuse(
@@ -494,14 +508,17 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
       // move onto the item the cursor is already on.
       if (active === to.el) return { ok: true, root: rootEl, from, to: to.el, moved: false };
 
-      const applied = commitActive(
+      const result = commitActive(
         makeDeps(rootEl, compiled),
         fromNode,
         to,
         opts?.direction ?? "programmatic",
       );
-      if (!applied) {
+      if (result === "cancelled") {
         return refuse("cancelled", "a navigation listener cancelled the move");
+      }
+      if (result === "not-an-item") {
+        return refuse("not-an-item", "the destination is no longer an item in the root");
       }
       logger.basic("active set", { rootEl, from, to: to.el });
       return { ok: true, root: rootEl, from, to: to.el, moved: true };
@@ -562,6 +579,7 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
   state.onKeydown = (ev: KeyboardEvent) => {
     const target = ev.target;
     if (!(target instanceof HTMLElement)) return;
+    state.reactor.flush();
     const rootEl = rootForTarget(target);
     if (!rootEl) return;
     let compiled = state.roots.get(rootEl);
