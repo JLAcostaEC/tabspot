@@ -1,5 +1,6 @@
 import { ActivationManager } from "./activation.ts";
 import { createLogger, type Logger } from "./debug.ts";
+import { safeMatches } from "./focusable.ts";
 import {
   type BoundaryWalk,
   commitActive,
@@ -201,10 +202,18 @@ export function tabspot(options: TabspotOptions = {}): TabspotInstance {
         const active = activationManager.getActive(rootEl);
         return active ? (compiled.byElement.get(active) ?? null) : null;
       },
-      canMoveTo: (to) =>
-        to.el.isConnected &&
-        rootEl.contains(to.el) &&
-        state.roots.get(rootEl)?.byElement.has(to.el) === true,
+      canMoveTo: (to) => {
+        const current = state.roots.get(rootEl)?.byElement.get(to.el);
+        const parent = current?.parent;
+        const items = parent?.kind === "mover" ? parent.opts.items : parent?.mover?.items;
+        // Classes can change in a listener without invalidating the cached tree.
+        return (
+          to.el.isConnected &&
+          rootEl.contains(to.el) &&
+          current !== undefined &&
+          (!items || safeMatches(to.el, items))
+        );
+      },
       applyMove: (_from, to) => {
         if (compiled.activation.mode === "focus") to.el.focus();
         else activationManager.setActive(rootEl, compiled.activation, to.el);

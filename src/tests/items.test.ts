@@ -173,3 +173,60 @@ describe("removing navigation items", () => {
     expect(b.isConnected).toBe(false);
   });
 });
+
+describe("listener changes to item membership", () => {
+  function mount(activation: "focus" | "marked"): void {
+    document.body.innerHTML = `
+      <div id="list" tabindex="0">
+        <button id="a" class="item">A</button>
+        <button id="b" class="item">B</button>
+      </div>`;
+    instance = tabspot();
+    setTabspotAttributes({
+      element: byId("list"),
+      config: { root: {}, mover: { axis: "vertical", items: ".item", activation } },
+    });
+    if (activation === "focus") byId("a").focus();
+    else setTabspotActive(byId("a"));
+  }
+
+  for (const activation of ["focus", "marked"] as const) {
+    it.each([false, true])(
+      `${activation}: revalidates membership after a listener (still matches: %s)`,
+      (stillMatches) => {
+        mount(activation);
+        const a = byId("a");
+        const b = byId("b");
+        instance.subscribe(({ to }) => {
+          if (to === b) b.className = stillMatches ? "item changed" : "changed";
+        });
+        const event = new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        });
+        (activation === "focus" ? a : byId("list")).dispatchEvent(event);
+
+        expect(event.defaultPrevented).toBe(stillMatches);
+        if (activation === "focus") expect(document.activeElement).toBe(stillMatches ? b : a);
+        else {
+          expect(a.hasAttribute("data-active")).toBe(!stillMatches);
+          expect(b.hasAttribute("data-active")).toBe(stillMatches);
+        }
+      },
+    );
+  }
+
+  it.each([false, true])("revalidates programmatic moves (still matches: %s)", (stillMatches) => {
+    mount("marked");
+    const b = byId("b");
+    instance.subscribe(({ to }) => {
+      if (to === b) b.className = stillMatches ? "item changed" : "changed";
+    });
+    expect(setTabspotActive(b)).toMatchObject(
+      stillMatches ? { ok: true, moved: true } : { ok: false, reason: "not-an-item" },
+    );
+    expect(byId("a").hasAttribute("data-active")).toBe(!stillMatches);
+    expect(b.hasAttribute("data-active")).toBe(stillMatches);
+  });
+});
